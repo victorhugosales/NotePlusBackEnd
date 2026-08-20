@@ -17,12 +17,16 @@ CREATE EXTENSION IF NOT EXISTS unaccent;
 --    dicionário de busca textual configurado na sessão). Por isso o Postgres
 --    recusa `CREATE INDEX ... (unaccent(coluna))` com o erro:
 --    "functions in index expression must be marked IMMUTABLE".
---    A solução padrão é este wrapper, fixando o dicionário 'unaccent' e
---    declarando IMMUTABLE (é seguro: não muda em runtime nesta aplicação).
+--    A solução padrão é este wrapper, declarando IMMUTABLE (é seguro: não
+--    muda em runtime nesta aplicação).
+--    O Supabase instala as extensões no schema "extensions" (não no
+--    "public"), por isso fixamos o search_path da função pra cobrir os dois
+--    casos — senão o Postgres não encontra o dicionário "unaccent".
 CREATE OR REPLACE FUNCTION immutable_unaccent(text)
 RETURNS text AS $$
-  SELECT unaccent('unaccent'::regdictionary, $1)
-$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT;
+  SELECT unaccent($1)
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+SET search_path = public, extensions;
 
 -- 3. Índices GIN de trigrama nas colunas usadas com ILIKE '%termo%'
 --    (um índice GIN trigram acelera ILIKE automaticamente, sem precisar
