@@ -15,16 +15,21 @@
     "author": "",
     "type": "commonjs",
     "dependencies": {
+        "bcryptjs": "^3.0.3",
         "cors": "^2.8.6",
+        "dotenv": "^17.4.2",
         "express": "^5.2.1",
+        "jsonwebtoken": "^9.0.3",
         "mssql": "^12.2.0",
         "pg": "^8.18.0",
         "reflect-metadata": "^0.2.2",
         "typeorm": "^0.3.28"
     },
     "devDependencies": {
+        "@types/bcryptjs": "^2.4.6",
         "@types/cors": "^2.8.19",
         "@types/express": "^5.0.6",
+        "@types/jsonwebtoken": "^9.0.10",
         "ts-node-dev": "^2.0.0",
         "typescript": "^5.9.3"
     }

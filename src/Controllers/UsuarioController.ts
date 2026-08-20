@@ -1,12 +1,22 @@
-import { Request, Response } from "express";
+import { Response } from "express";
+import bcrypt from "bcryptjs";
 import { AppDataSource } from "../database/datasource";
 import { Usuario } from "../Entities/Usuario";
 /* import { UsuarioConfig } from "../Entities/UsuarioConfig"; */
 import { NotasCorte } from "../Entities/NotasCorte";
+import { AuthRequest } from "../middlewares/authMiddleware";
+import { signToken } from "../utils/jwt";
+
+const SALT_ROUNDS = 10;
 
 export class UsuarioController {
-    async getProfile(req: Request, res: Response) {
+    async getProfile(req: AuthRequest, res: Response) {
         const { id } = req.params;
+
+        if (req.userId !== Number(id)) {
+            return res.status(403).json({ error: "Você não tem permissão para acessar este perfil" });
+        }
+
         const repo = AppDataSource.getRepository(Usuario);
 
         try {
@@ -15,27 +25,30 @@ export class UsuarioController {
                 relations: ["configuracoes"]
             });
             if (!usuario) return res.status(404).json({ error: "Usuário não encontrado" });
-            return res.json(usuario);
+
+            const { senha_hash, ...usuarioSemSenha } = usuario;
+            return res.json(usuarioSemSenha);
         } catch (error) {
             return res.status(500).json({ error: "Erro ao buscar perfil" });
         }
     }
 
-    async updateProfile(req: Request, res: Response) {
+    async updateProfile(req: AuthRequest, res: Response) {
         const { id } = req.params;
-        const { nome, email, avatar_url, senha_hash } = req.body;
-        const repo = AppDataSource.getRepository(Usuario);
+        const { nome, email, avatar_url, senha } = req.body;
 
-        if (!id) {
-            return res.status(400).json({ error: "ID não fornecido" });
+        if (req.userId !== Number(id)) {
+            return res.status(403).json({ error: "Você não tem permissão para editar este perfil" });
         }
 
+        const repo = AppDataSource.getRepository(Usuario);
+
         try {
-            const updateData: any = {};
+            const updateData: Partial<Usuario> = {};
             if (nome) updateData.nome = nome;
             if (email) updateData.email = email;
             if (avatar_url) updateData.avatar_url = avatar_url;
-            if (senha_hash) updateData.senha_hash = senha_hash;
+            if (senha) updateData.senha_hash = await bcrypt.hash(senha, SALT_ROUNDS);
 
             await repo.update(Number(id), updateData);
 
@@ -46,30 +59,56 @@ export class UsuarioController {
         }
     }
 
-    async create(req: Request, res: Response) {
+    async create(req: AuthRequest, res: Response) {
         const { nome, email, senha } = req.body;
+
+        if (!nome || !email || !senha) {
+            return res.status(400).json({ error: "Nome, e-mail e senha são obrigatórios" });
+        }
+
+        if (senha.length < 8) {
+            return res.status(400).json({ error: "A senha deve ter no mínimo 8 caracteres" });
+        }
+
         const repo = AppDataSource.getRepository(Usuario);
 
         try {
             const userExists = await repo.findOneBy({ email });
             if (userExists) return res.status(400).json({ error: "Email já cadastrado" });
 
+            const senha_hash = await bcrypt.hash(senha, SALT_ROUNDS);
+
             const novoUsuario = repo.create({
                 nome,
                 email,
-                senha_hash: senha
+                senha_hash
             });
 
             await repo.save(novoUsuario);
 
-            return res.status(201).json({ message: "Usuário criado com sucesso!" });
+            const token = signToken({ id: novoUsuario.id, email: novoUsuario.email });
+
+            return res.status(201).json({
+                token,
+                user: {
+                    id: novoUsuario.id,
+                    nome: novoUsuario.nome,
+                    email: novoUsuario.email
+                }
+            });
         } catch (error) {
+            console.error(error);
             return res.status(500).json({ error: "Erro ao criar conta" });
         }
     }
 
-    async delete(req: Request, res: Response) {
+    async delete(req: AuthRequest, res: Response) {
         const { id } = req.params;
+
+        if (req.userId !== Number(id)) {
+            return res.status(403).json({ error: "Você não tem permissão para excluir este perfil" });
+        }
+
         const repo = AppDataSource.getRepository(Usuario);
 
         try {
@@ -89,7 +128,7 @@ export class UsuarioController {
         }
     }
 
-    async getDashboardStats(req: Request, res: Response) {
+    async getDashboardStats(req: AuthRequest, res: Response) {
         const repo = AppDataSource.getRepository(NotasCorte);
 
         try {
