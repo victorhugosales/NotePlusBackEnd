@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../database/datasource";
 import { NotasCorte } from "../Entities/NotasCorte";
 import { Like, ILike, Raw } from "typeorm";
+import { pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY } from "../cache/searchCache";
 
 export class NotasCorteController {
   async search(req: Request, res: Response) {
@@ -19,6 +20,17 @@ export class NotasCorteController {
       vagas: true,
       grau: true,
       ano: true
+    };
+
+    // Cache: a mesma combinação de filtros tende a se repetir bastante
+    // entre usuários diferentes (cursos/instituições populares).
+    const cacheKey = JSON.stringify(req.query);
+    const cached = pesquisaCache.get(cacheKey);
+    if (cached) return res.json(cached);
+
+    const respond = (data: unknown) => {
+      pesquisaCache.set(cacheKey, data);
+      return res.json(data);
     };
 
     if (cidade) filtros.cidade = ILike(`%${cidade}%`);
@@ -51,7 +63,7 @@ export class NotasCorteController {
         ])
         .where(
           `
-      unaccent(nota.curso) ILIKE unaccent(:curso)
+      immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)
       OR nota.sigla_universidade ILIKE :curso
       OR nota.nome_universidade ILIKE :curso
       `,
@@ -68,7 +80,7 @@ export class NotasCorteController {
         .limit(100)
         .getRawMany();
 
-      return res.json(resultados);
+      return respond(resultados);
     }
     // Página de Cursos (apenas curso)
     else if (curso && !universidade) {
@@ -84,7 +96,7 @@ export class NotasCorteController {
           "nota.grau AS grau",
           "SUM(nota.vagas) AS vagas"
         ])
-        .where("unaccent(nota.curso) ILIKE unaccent(:curso)", {
+        .where("immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)", {
           curso: `%${curso}%`
         })
         .groupBy("nota.curso")
@@ -97,7 +109,7 @@ export class NotasCorteController {
         .limit(100)
         .getRawMany();
 
-      return res.json(resultados);
+      return respond(resultados);
     }
     // Página de Instituições (apenas universidade)
     else if (universidade) {
@@ -132,7 +144,7 @@ export class NotasCorteController {
         .limit(200)
         .getRawMany();
 
-      return res.json(resultados);
+      return respond(resultados);
     }
     const resultados = await repo.find({
       where: whereClause,
@@ -140,13 +152,17 @@ export class NotasCorteController {
       take: 100,
     });
 
-    return res.json(resultados);
+    return respond(resultados);
   }
 
   async suggestions(req: Request, res: Response) {
     const { curso, universidade } = req.query;
 
     if (!curso && !universidade) return res.json([]);
+
+    const cacheKey = `sugestoes:${universidade ? `universidade:${universidade}` : `curso:${curso}`}`;
+    const cached = sugestoesCache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const repo = AppDataSource.getRepository(NotasCorte);
 
@@ -162,18 +178,22 @@ export class NotasCorteController {
           .limit(10)
           .getRawMany();
 
-        return res.json(unis.map(u => u.sigla));
+        const resultado = unis.map(u => u.sigla);
+        sugestoesCache.set(cacheKey, resultado);
+        return res.json(resultado);
       }
 
       if (curso) {
         // Busca por NOME do curso (com unaccent)
         const cursos = await query
           .select("DISTINCT(nota.curso)", "curso")
-          .where("unaccent(nota.curso) ILIKE unaccent(:termo)", { termo: `%${curso}%` })
+          .where("immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:termo)", { termo: `%${curso}%` })
           .limit(10)
           .getRawMany();
 
-        return res.json(cursos.map(c => c.curso));
+        const resultado = cursos.map(c => c.curso);
+        sugestoesCache.set(cacheKey, resultado);
+        return res.json(resultado);
       }
 
     } catch (error) {

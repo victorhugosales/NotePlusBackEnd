@@ -6,6 +6,7 @@ import { Usuario } from "../Entities/Usuario";
 import { NotasCorte } from "../Entities/NotasCorte";
 import { AuthRequest } from "../middlewares/authMiddleware";
 import { signToken } from "../utils/jwt";
+import { statsCache, STATS_CACHE_KEY } from "../cache/searchCache";
 
 const SALT_ROUNDS = 10;
 
@@ -129,6 +130,9 @@ export class UsuarioController {
     }
 
     async getDashboardStats(req: AuthRequest, res: Response) {
+        const cached = statsCache.get(STATS_CACHE_KEY);
+        if (cached) return res.json(cached);
+
         const repo = AppDataSource.getRepository(NotasCorte);
 
         try {
@@ -146,12 +150,14 @@ export class UsuarioController {
             const mediaCursos = totalFaculdades > 0
                 ? (totalCursos / totalFaculdades).toFixed(1)
                 : 0;
-            return res.json({
+            const resultado = {
                 totalCursos,
                 totalFaculdades,
                 totalEstados,
                 mediaCursos
-            });
+            };
+            statsCache.set(STATS_CACHE_KEY, resultado);
+            return res.json(resultado);
         } catch (error) {
             console.error("Erro no Dashboard:", error);
             return res.status(500).json({ error: "Erro ao buscar estatísticas" });
