@@ -21,7 +21,7 @@ const SUM_VAGAS = `SUM(NULLIF(nota."QT_VAGAS_OFERTADAS"::text, '')::numeric)`;
 
 export class NotasCorteController {
   async search(req: Request, res: Response) {
-    const { curso, universidade, cidade, ano, global, codigo } = req.query;
+    const { curso, universidade, cidade, ano, global, codigo, uf } = req.query;
     const filtros: any = {};
     const isDetalhes = curso && universidade && global !== 'true';
     const colunasLista: any = {
@@ -69,7 +69,7 @@ export class NotasCorteController {
 
       // 2. Busca Global (Home)
       else if (global === 'true' && curso) {
-        const resultados = await repo
+        const query = repo
           .createQueryBuilder("nota")
           .select([
             "nota.curso AS curso",
@@ -88,7 +88,14 @@ export class NotasCorteController {
         OR nota.nome_universidade ILIKE :curso
         `,
             { curso: `%${curso}%` }
-          )
+          );
+
+        // Filtro padrão de Estado: restringe aos campi da UF escolhida.
+        if (uf) {
+          query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+        }
+
+        const resultados = await query
           .groupBy("nota.curso")
           .addGroupBy("nota.codigo_curso")
           .addGroupBy("nota.sigla_universidade")
