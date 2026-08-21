@@ -3,6 +3,7 @@ import cors from 'cors';
 import compression from 'compression';
 import { AppDataSource } from "./database/datasource";
 import routes from "./routes";
+import { agendarNotificacoes } from "./jobs/notificacoesJob";
 
 AppDataSource.initialize().then(() => {
     const app = express();
@@ -11,6 +12,8 @@ AppDataSource.initialize().then(() => {
     app.use(compression());
     app.use(express.json());
     app.use(routes);
+
+    agendarNotificacoes();
 
     return app.listen(3333, () => console.log("Servidor rodando na porta 3333 e Banco Conectado!"));
 }).catch(error => console.log("Erro ao conectar no banco:", error));
