@@ -4,6 +4,21 @@ import { NotasCorte } from "../Entities/NotasCorte";
 import { Like, ILike, Raw } from "typeorm";
 import { pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY } from "../cache/searchCache";
 
+// A coluna QT_VAGAS_OFERTADAS não tem o mesmo tipo em todos os ambientes
+// (varchar em alguns bancos, numeric/integer em outros, resquício da forma
+// como os microdados do INEP foram importados). SUM() não aceita varchar
+// diretamente, então convertemos para texto e depois para numeric de forma
+// defensiva — funciona independente do tipo real da coluna, e trata string
+// vazia como 0 em vez de quebrar a query.
+//
+// Referenciamos a coluna física entre aspas (nota."QT_VAGAS_OFERTADAS") em
+// vez de "nota.vagas": dentro de uma expressão com cast (::text), o
+// tradutor automático de alias do TypeORM não reconhece o padrão e manda
+// "nota.vagas" cru pro Postgres, que não existe (o nome físico da coluna é
+// outro). Referenciando a coluna física direto, isso não depende dessa
+// tradução.
+const SUM_VAGAS = `SUM(NULLIF(nota."QT_VAGAS_OFERTADAS"::text, '')::numeric)`;
+
 export class NotasCorteController {
   async search(req: Request, res: Response) {
     const { curso, universidade, cidade, ano, global, codigo } = req.query;
@@ -26,10 +41,14 @@ export class NotasCorteController {
     // entre usuários diferentes (cursos/instituições populares).
     const cacheKey = JSON.stringify(req.query);
     const cached = pesquisaCache.get(cacheKey);
-    if (cached) return res.json(cached);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
 
     const respond = (data: unknown) => {
       pesquisaCache.set(cacheKey, data);
+      res.setHeader("X-Cache", "MISS");
       return res.json(data);
     };
 
@@ -39,120 +58,125 @@ export class NotasCorteController {
     const repo = AppDataSource.getRepository(NotasCorte);
     let whereClause: any;
 
-    // Página de Detalhes
-    if (codigo) {
-      whereClause = {
-        ...filtros,
-        codigo_curso: Number(codigo)
-      };
-    }
+    try {
+      // Página de Detalhes
+      if (codigo) {
+        whereClause = {
+          ...filtros,
+          codigo_curso: Number(codigo)
+        };
+      }
 
-    // 2. Busca Global (Home)
-    else if (global === 'true' && curso) {
-      const resultados = await repo
-        .createQueryBuilder("nota")
-        .select([
-          "nota.curso AS curso",
-          "nota.codigo_curso AS codigo_curso",
-          "nota.sigla_universidade AS sigla_universidade",
-          "nota.nome_universidade AS nome_universidade",
-          "nota.uf_campus AS uf_campus",
-          "nota.campus AS campus",
-          "nota.grau AS grau",
-          "SUM(nota.vagas) AS vagas"
-        ])
-        .where(
-          `
-      immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)
-      OR nota.sigla_universidade ILIKE :curso
-      OR nota.nome_universidade ILIKE :curso
-      `,
-          { curso: `%${curso}%` }
-        )
-        .groupBy("nota.curso")
-        .addGroupBy("nota.codigo_curso")
-        .addGroupBy("nota.sigla_universidade")
-        .addGroupBy("nota.nome_universidade")
-        .addGroupBy("nota.uf_campus")
-        .addGroupBy("nota.campus")
-        .addGroupBy("nota.grau")
-        .orderBy("vagas", "DESC")
-        .limit(100)
-        .getRawMany();
+      // 2. Busca Global (Home)
+      else if (global === 'true' && curso) {
+        const resultados = await repo
+          .createQueryBuilder("nota")
+          .select([
+            "nota.curso AS curso",
+            "nota.codigo_curso AS codigo_curso",
+            "nota.sigla_universidade AS sigla_universidade",
+            "nota.nome_universidade AS nome_universidade",
+            "nota.uf_campus AS uf_campus",
+            "nota.campus AS campus",
+            "nota.grau AS grau",
+            `${SUM_VAGAS} AS vagas`
+          ])
+          .where(
+            `
+        immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)
+        OR nota.sigla_universidade ILIKE :curso
+        OR nota.nome_universidade ILIKE :curso
+        `,
+            { curso: `%${curso}%` }
+          )
+          .groupBy("nota.curso")
+          .addGroupBy("nota.codigo_curso")
+          .addGroupBy("nota.sigla_universidade")
+          .addGroupBy("nota.nome_universidade")
+          .addGroupBy("nota.uf_campus")
+          .addGroupBy("nota.campus")
+          .addGroupBy("nota.grau")
+          .orderBy("vagas", "DESC")
+          .limit(100)
+          .getRawMany();
+
+        return respond(resultados);
+      }
+      // Página de Cursos (apenas curso)
+      else if (curso && !universidade) {
+
+        const resultados = await repo
+          .createQueryBuilder("nota")
+          .select([
+            "nota.curso AS curso",
+            "nota.codigo_curso AS codigo_curso",
+            "nota.sigla_universidade AS sigla_universidade",
+            "nota.nome_universidade AS nome_universidade",
+            "nota.campus AS campus",
+            "nota.grau AS grau",
+            `${SUM_VAGAS} AS vagas`
+          ])
+          .where("immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)", {
+            curso: `%${curso}%`
+          })
+          .groupBy("nota.curso")
+          .addGroupBy("nota.codigo_curso")
+          .addGroupBy("nota.sigla_universidade")
+          .addGroupBy("nota.nome_universidade")
+          .addGroupBy("nota.campus")
+          .addGroupBy("nota.grau")
+          .orderBy("vagas", "DESC")
+          .limit(100)
+          .getRawMany();
+
+        return respond(resultados);
+      }
+      // Página de Instituições (apenas universidade)
+      else if (universidade) {
+
+        const resultados = await repo
+          .createQueryBuilder("nota")
+          .select([
+            "nota.curso AS curso",
+            "nota.codigo_curso AS codigo_curso",
+            "nota.sigla_universidade AS sigla_universidade",
+            "nota.nome_universidade AS nome_universidade",
+            "nota.uf_campus AS uf_campus",
+            "nota.campus AS campus",
+            "nota.grau AS grau",
+            `${SUM_VAGAS} AS vagas`
+          ])
+          .where(
+            `
+        nota.sigla_universidade ILIKE :universidade
+        OR nota.nome_universidade ILIKE :universidade
+        `,
+            { universidade: `%${universidade}%` }
+          )
+          .groupBy("nota.curso")
+          .addGroupBy("nota.codigo_curso")
+          .addGroupBy("nota.sigla_universidade")
+          .addGroupBy("nota.nome_universidade")
+          .addGroupBy("nota.uf_campus")
+          .addGroupBy("nota.campus")
+          .addGroupBy("nota.grau")
+          .orderBy("nota.curso", "ASC")
+          .limit(200)
+          .getRawMany();
+
+        return respond(resultados);
+      }
+      const resultados = await repo.find({
+        where: whereClause,
+        order: { nota_corte: "DESC" },
+        take: 100,
+      });
 
       return respond(resultados);
+    } catch (error) {
+      console.error("Erro na busca de notas de corte:", error);
+      return res.status(500).json({ error: "Erro ao buscar notas de corte" });
     }
-    // Página de Cursos (apenas curso)
-    else if (curso && !universidade) {
-
-      const resultados = await repo
-        .createQueryBuilder("nota")
-        .select([
-          "nota.curso AS curso",
-          "nota.codigo_curso AS codigo_curso",
-          "nota.sigla_universidade AS sigla_universidade",
-          "nota.nome_universidade AS nome_universidade",
-          "nota.campus AS campus",
-          "nota.grau AS grau",
-          "SUM(nota.vagas) AS vagas"
-        ])
-        .where("immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)", {
-          curso: `%${curso}%`
-        })
-        .groupBy("nota.curso")
-        .addGroupBy("nota.codigo_curso")
-        .addGroupBy("nota.sigla_universidade")
-        .addGroupBy("nota.nome_universidade")
-        .addGroupBy("nota.campus")
-        .addGroupBy("nota.grau")
-        .orderBy("vagas", "DESC")
-        .limit(100)
-        .getRawMany();
-
-      return respond(resultados);
-    }
-    // Página de Instituições (apenas universidade)
-    else if (universidade) {
-
-      const resultados = await repo
-        .createQueryBuilder("nota")
-        .select([
-          "nota.curso AS curso",
-          "nota.codigo_curso AS codigo_curso",
-          "nota.sigla_universidade AS sigla_universidade",
-          "nota.nome_universidade AS nome_universidade",
-          "nota.uf_campus AS uf_campus",
-          "nota.campus AS campus",
-          "nota.grau AS grau",
-          "SUM(nota.vagas) AS vagas"
-        ])
-        .where(
-          `
-      nota.sigla_universidade ILIKE :universidade
-      OR nota.nome_universidade ILIKE :universidade
-      `,
-          { universidade: `%${universidade}%` }
-        )
-        .groupBy("nota.curso")
-        .addGroupBy("nota.codigo_curso")
-        .addGroupBy("nota.sigla_universidade")
-        .addGroupBy("nota.nome_universidade")
-        .addGroupBy("nota.uf_campus")
-        .addGroupBy("nota.campus")
-        .addGroupBy("nota.grau")
-        .orderBy("nota.curso", "ASC")
-        .limit(200)
-        .getRawMany();
-
-      return respond(resultados);
-    }
-    const resultados = await repo.find({
-      where: whereClause,
-      order: { nota_corte: "DESC" },
-      take: 100,
-    });
-
-    return respond(resultados);
   }
 
   async suggestions(req: Request, res: Response) {
@@ -162,7 +186,10 @@ export class NotasCorteController {
 
     const cacheKey = `sugestoes:${universidade ? `universidade:${universidade}` : `curso:${curso}`}`;
     const cached = sugestoesCache.get(cacheKey);
-    if (cached) return res.json(cached);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
 
     const repo = AppDataSource.getRepository(NotasCorte);
 
@@ -180,6 +207,7 @@ export class NotasCorteController {
 
         const resultado = unis.map(u => u.sigla);
         sugestoesCache.set(cacheKey, resultado);
+        res.setHeader("X-Cache", "MISS");
         return res.json(resultado);
       }
 
@@ -193,6 +221,7 @@ export class NotasCorteController {
 
         const resultado = cursos.map(c => c.curso);
         sugestoesCache.set(cacheKey, resultado);
+        res.setHeader("X-Cache", "MISS");
         return res.json(resultado);
       }
 

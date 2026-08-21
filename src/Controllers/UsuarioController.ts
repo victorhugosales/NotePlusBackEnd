@@ -131,7 +131,10 @@ export class UsuarioController {
 
     async getDashboardStats(req: AuthRequest, res: Response) {
         const cached = statsCache.get(STATS_CACHE_KEY);
-        if (cached) return res.json(cached);
+        if (cached) {
+            res.setHeader("X-Cache", "HIT");
+            return res.json(cached);
+        }
 
         const repo = AppDataSource.getRepository(NotasCorte);
 
@@ -157,6 +160,7 @@ export class UsuarioController {
                 mediaCursos
             };
             statsCache.set(STATS_CACHE_KEY, resultado);
+            res.setHeader("X-Cache", "MISS");
             return res.json(resultado);
         } catch (error) {
             console.error("Erro no Dashboard:", error);
