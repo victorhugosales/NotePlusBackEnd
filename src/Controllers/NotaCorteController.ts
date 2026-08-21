@@ -82,15 +82,19 @@ export class NotasCorteController {
             `${SUM_VAGAS} AS vagas`
           ])
           .where(
-            `
+            `(
         immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)
         OR nota.sigla_universidade ILIKE :curso
         OR nota.nome_universidade ILIKE :curso
-        `,
+        )`,
             { curso: `%${curso}%` }
           );
 
         // Filtro padrão de Estado: restringe aos campi da UF escolhida.
+        // Precisa dos parênteses acima: sem eles, "A OR B OR C AND D" vira
+        // "A OR B OR (C AND D)" (AND tem precedência sobre OR em SQL), e o
+        // filtro de estado acaba sendo ignorado sempre que curso ou sigla
+        // batem sozinhos.
         if (uf) {
           query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
         }
