@@ -99,6 +99,12 @@ export class NotasCorteController {
           query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
         }
 
+        // Filtro de edição: sem isso, com 2025 e 2026 convivendo na mesma
+        // tabela, o SUM(vagas) soma as duas edições juntas.
+        if (ano) {
+          query.andWhere("nota.ano = :ano", { ano: String(ano) });
+        }
+
         const resultados = await query
           .groupBy("nota.curso")
           .addGroupBy("nota.codigo_curso")
@@ -116,24 +122,35 @@ export class NotasCorteController {
       // Página de Cursos (apenas curso)
       else if (curso && !universidade) {
 
-        const resultados = await repo
+        const query = repo
           .createQueryBuilder("nota")
           .select([
             "nota.curso AS curso",
             "nota.codigo_curso AS codigo_curso",
             "nota.sigla_universidade AS sigla_universidade",
             "nota.nome_universidade AS nome_universidade",
+            "nota.uf_campus AS uf_campus",
             "nota.campus AS campus",
             "nota.grau AS grau",
             `${SUM_VAGAS} AS vagas`
           ])
           .where("immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)", {
             curso: `%${curso}%`
-          })
+          });
+
+        if (uf) {
+          query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+        }
+        if (ano) {
+          query.andWhere("nota.ano = :ano", { ano: String(ano) });
+        }
+
+        const resultados = await query
           .groupBy("nota.curso")
           .addGroupBy("nota.codigo_curso")
           .addGroupBy("nota.sigla_universidade")
           .addGroupBy("nota.nome_universidade")
+          .addGroupBy("nota.uf_campus")
           .addGroupBy("nota.campus")
           .addGroupBy("nota.grau")
           .orderBy("vagas", "DESC")
