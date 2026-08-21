@@ -9,6 +9,7 @@
         "start": "node dist/server.js",
         "dev": "ts-node-dev --transpile-only src/server.ts",
         "typeorm": "ts-node-dev ./node_modules/typeorm/cli.js",
+        "import:notas": "ts-node --transpile-only src/scripts/importarNotasCorte.ts",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "keywords": [],
@@ -19,6 +20,7 @@
         "compression": "^1.8.1",
         "cors": "^2.8.6",
         "dotenv": "^17.4.2",
+        "exceljs": "^4.4.0",
         "express": "^5.2.1",
         "jsonwebtoken": "^9.0.3",
         "lru-cache": "^11.5.2",
