@@ -10,6 +10,13 @@ import { statsCache, STATS_CACHE_KEY } from "../cache/searchCache";
 
 const SALT_ROUNDS = 10;
 
+// Modalidades de concorrência reconhecidas (Lei de Cotas, 12.711/2012).
+// Mesma lista usada no front pra montar os checkboxes — validamos aqui de
+// novo pra não deixar o banco receber valor arbitrário vindo da API.
+export const MODALIDADES_VALIDAS = [
+    "AC", "LB_PPI", "LI_PPI", "LB_Q", "LI_Q", "LB_PCD", "LI_PCD", "LB_EP", "LI_EP"
+];
+
 export class UsuarioController {
     async getProfile(req: AuthRequest, res: Response) {
         const { id } = req.params;
@@ -36,10 +43,25 @@ export class UsuarioController {
 
     async updateProfile(req: AuthRequest, res: Response) {
         const { id } = req.params;
-        const { nome, email, avatar_url, senha } = req.body;
+        const { nome, email, avatar_url, senha, nota_enem, modalidades } = req.body;
 
         if (req.userId !== Number(id)) {
             return res.status(403).json({ error: "Você não tem permissão para editar este perfil" });
+        }
+
+        if (nota_enem !== undefined && nota_enem !== null) {
+            const nota = Number(nota_enem);
+            if (!Number.isFinite(nota) || nota < 0 || nota > 1000) {
+                return res.status(400).json({ error: "Nota do ENEM deve ser um número entre 0 e 1000" });
+            }
+        }
+
+        if (modalidades !== undefined) {
+            const invalida = !Array.isArray(modalidades) ||
+                modalidades.some((m: unknown) => typeof m !== "string" || !MODALIDADES_VALIDAS.includes(m));
+            if (invalida) {
+                return res.status(400).json({ error: "Modalidade de concorrência inválida" });
+            }
         }
 
         const repo = AppDataSource.getRepository(Usuario);
@@ -50,6 +72,8 @@ export class UsuarioController {
             if (email) updateData.email = email;
             if (avatar_url) updateData.avatar_url = avatar_url;
             if (senha) updateData.senha_hash = await bcrypt.hash(senha, SALT_ROUNDS);
+            if (nota_enem !== undefined) updateData.nota_enem = nota_enem === null ? null : Number(nota_enem);
+            if (modalidades !== undefined) updateData.modalidades = modalidades;
 
             await repo.update(Number(id), updateData);
 
