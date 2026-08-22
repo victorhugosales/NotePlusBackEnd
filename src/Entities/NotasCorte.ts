@@ -38,6 +38,12 @@ export class NotasCorte {
   @Column({ name: 'DS_MOD_CONCORRENCIA' })
   descricao_cota!: string;
 
+  // Matutino/Vespertino/Noturno/EAD etc. Duas linhas com a mesma
+  // modalidade só são "o mesmo curso" se também tiverem o mesmo turno —
+  // senão são ofertas distintas com vagas e notas de corte próprias.
+  @Column({ name: 'DS_TURNO', nullable: true })
+  turno?: string;
+
   @Column({ name: 'QT_VAGAS_OFERTADAS' })
   vagas!: number;
 

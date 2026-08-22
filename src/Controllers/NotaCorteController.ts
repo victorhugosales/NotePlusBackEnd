@@ -21,7 +21,7 @@ const SUM_VAGAS = `SUM(NULLIF(nota."QT_VAGAS_OFERTADAS"::text, '')::numeric)`;
 
 export class NotasCorteController {
   async search(req: Request, res: Response) {
-    const { curso, universidade, cidade, ano, global, codigo, uf } = req.query;
+    const { curso, universidade, cidade, ano, global, codigo, uf, turno } = req.query;
     const filtros: any = {};
     const isDetalhes = curso && universidade && global !== 'true';
     const colunasLista: any = {
@@ -54,6 +54,9 @@ export class NotasCorteController {
 
     if (cidade) filtros.cidade = ILike(`%${cidade}%`);
     if (ano) filtros.ano = Number(ano);
+    // Sem turno informado, a página de Detalhes mostra todos os turnos
+    // juntos (compatível com links antigos); com turno, filtra só aquele.
+    if (turno) filtros.turno = turno;
 
     const repo = AppDataSource.getRepository(NotasCorte);
     let whereClause: any;
@@ -79,6 +82,7 @@ export class NotasCorteController {
             "nota.uf_campus AS uf_campus",
             "nota.campus AS campus",
             "nota.grau AS grau",
+            "nota.turno AS turno",
             `${SUM_VAGAS} AS vagas`
           ])
           .where(
@@ -113,6 +117,7 @@ export class NotasCorteController {
           .addGroupBy("nota.uf_campus")
           .addGroupBy("nota.campus")
           .addGroupBy("nota.grau")
+          .addGroupBy("nota.turno")
           .orderBy("vagas", "DESC")
           .limit(100)
           .getRawMany();
@@ -132,6 +137,7 @@ export class NotasCorteController {
             "nota.uf_campus AS uf_campus",
             "nota.campus AS campus",
             "nota.grau AS grau",
+            "nota.turno AS turno",
             `${SUM_VAGAS} AS vagas`
           ])
           .where("immutable_unaccent(nota.curso) ILIKE immutable_unaccent(:curso)", {
@@ -153,6 +159,7 @@ export class NotasCorteController {
           .addGroupBy("nota.uf_campus")
           .addGroupBy("nota.campus")
           .addGroupBy("nota.grau")
+          .addGroupBy("nota.turno")
           .orderBy("vagas", "DESC")
           .limit(100)
           .getRawMany();
@@ -172,6 +179,7 @@ export class NotasCorteController {
             "nota.uf_campus AS uf_campus",
             "nota.campus AS campus",
             "nota.grau AS grau",
+            "nota.turno AS turno",
             `${SUM_VAGAS} AS vagas`
           ])
           .where(
@@ -188,6 +196,7 @@ export class NotasCorteController {
           .addGroupBy("nota.uf_campus")
           .addGroupBy("nota.campus")
           .addGroupBy("nota.grau")
+          .addGroupBy("nota.turno")
           .orderBy("nota.curso", "ASC")
           .limit(200)
           .getRawMany();
