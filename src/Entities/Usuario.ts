@@ -54,6 +54,15 @@ export class Usuario {
   @Column({ type: "simple-array", nullable: true })
   modalidades?: string[];
 
+  // Recuperação de senha: guardamos o hash SHA-256 do token (não o token em
+  // si) — assim, mesmo um vazamento do banco não permite gerar o link de
+  // redefinição de ninguém. Token expira em 1h (reset_token_expira_em).
+  @Column({ type: "varchar", nullable: true })
+  reset_token_hash?: string | null;
+
+  @Column({ type: "timestamp", nullable: true })
+  reset_token_expira_em?: Date | null;
+
   @OneToOne(() => UsuarioConfig, (config) => config.usuario)
   configuracoes!: UsuarioConfig;
 }

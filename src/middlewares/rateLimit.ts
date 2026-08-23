@@ -30,6 +30,17 @@ export const limiterLogin = rateLimit({
   message: { error: "Muitas tentativas de login. Aguarde alguns minutos e tente de novo." },
 });
 
+// /recuperar-senha e /redefinir-senha: cada solicitação dispara um e-mail
+// (custo real no provedor) e cada tentativa de redefinir é uma tentativa de
+// adivinhar/força-bruta o token. Limite baixo por IP em ambas.
+export const limiterRecuperacaoSenha = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hora
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas solicitações de redefinição de senha. Aguarde um pouco e tente de novo." },
+});
+
 // /usuarios (cadastro): evita criação automatizada de contas em massa.
 export const limiterCadastro = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora

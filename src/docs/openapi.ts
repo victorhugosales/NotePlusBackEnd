@@ -279,6 +279,71 @@ export const openApiSpec = {
                 },
             },
         },
+        "/recuperar-senha": {
+            post: {
+                tags: ["Autenticação"],
+                summary: "Solicita redefinição de senha",
+                description:
+                    "Gera um token de redefinição (válido por 1h) e envia por e-mail via Resend. Sempre responde com a mesma mensagem genérica, exista ou não conta com esse e-mail — evita enumeração de contas cadastradas.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["email"],
+                                properties: { email: { type: "string" } },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: "Solicitação processada (não indica se o e-mail existe)",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { message: { type: "string" } } },
+                            },
+                        },
+                    },
+                    400: { description: "E-mail não informado", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/redefinir-senha": {
+            post: {
+                tags: ["Autenticação"],
+                summary: "Redefine a senha usando o token recebido por e-mail",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["token", "novaSenha"],
+                                properties: {
+                                    token: { type: "string", description: "Token recebido no link do e-mail" },
+                                    novaSenha: { type: "string", description: "Mínimo 8 caracteres, com letras e números" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: "Senha redefinida com sucesso",
+                        content: {
+                            "application/json": {
+                                schema: { type: "object", properties: { message: { type: "string" } } },
+                            },
+                        },
+                    },
+                    400: { description: "Token inválido/expirado, ou senha fora do padrão exigido", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
         "/usuarios": {
             post: {
                 tags: ["Autenticação"],

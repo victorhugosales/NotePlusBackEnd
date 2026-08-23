@@ -5,7 +5,7 @@ import { AuthController } from "./Controllers/AuthController";
 import { FavoritoController } from "./Controllers/FavoritoController";
 import { NotificacaoController } from "./Controllers/NotificacaoController";
 import { authMiddleware } from "./middlewares/authMiddleware";
-import { limiterBusca, limiterLogin, limiterCadastro } from "./middlewares/rateLimit";
+import { limiterBusca, limiterLogin, limiterCadastro, limiterRecuperacaoSenha } from "./middlewares/rateLimit";
 
 const usuarioController = new UsuarioController();
 const controller = new NotasCorteController();
@@ -26,6 +26,8 @@ routes.get("/stats", limiterBusca, (req, res) => new UsuarioController().getDash
 routes.post("/login", limiterLogin, authController.login);
 routes.post("/login/google", limiterLogin, authController.loginGoogle);
 routes.post("/usuarios", limiterCadastro, usuarioController.create);
+routes.post("/recuperar-senha", limiterRecuperacaoSenha, authController.recuperarSenha);
+routes.post("/redefinir-senha", limiterRecuperacaoSenha, authController.redefinirSenha);
 
 // Rotas protegidas (exigem token válido e dono do recurso)
 routes.get("/usuario/:id", authMiddleware, usuarioController.getProfile);
