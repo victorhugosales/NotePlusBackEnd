@@ -5,6 +5,7 @@ import { AuthController } from "./Controllers/AuthController";
 import { FavoritoController } from "./Controllers/FavoritoController";
 import { NotificacaoController } from "./Controllers/NotificacaoController";
 import { authMiddleware } from "./middlewares/authMiddleware";
+import { limiterBusca, limiterLogin, limiterCadastro } from "./middlewares/rateLimit";
 
 const usuarioController = new UsuarioController();
 const controller = new NotasCorteController();
@@ -12,14 +13,17 @@ const favoritoController = new FavoritoController();
 const notificacaoController = new NotificacaoController();
 const routes = Router();
 
-// Rotas públicas (pesquisa de notas de corte é livre)
-routes.get("/pesquisar", new NotasCorteController().search);
-routes.get("/sugestoes", controller.suggestions);
-routes.get("/stats", (req, res) => new UsuarioController().getDashboardStats(req, res));
+// Rotas públicas (pesquisa de notas de corte é livre). Sem autenticação
+// pra travar quem bate nelas, o rate limit por IP é a única barreira
+// contra scraping/automação.
+routes.get("/pesquisar", limiterBusca, new NotasCorteController().search);
+routes.get("/sugestoes", limiterBusca, controller.suggestions);
+routes.get("/stats", limiterBusca, (req, res) => new UsuarioController().getDashboardStats(req, res));
 
-// Autenticação
-routes.post("/login", new AuthController().login);
-routes.post("/usuarios", usuarioController.create);
+// Autenticação — limites mais apertados: /login contra força bruta de
+// senha, /usuarios contra criação automatizada de contas.
+routes.post("/login", limiterLogin, new AuthController().login);
+routes.post("/usuarios", limiterCadastro, usuarioController.create);
 
 // Rotas protegidas (exigem token válido e dono do recurso)
 routes.get("/usuario/:id", authMiddleware, usuarioController.getProfile);
