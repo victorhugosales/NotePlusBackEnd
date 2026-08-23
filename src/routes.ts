@@ -11,6 +11,7 @@ const usuarioController = new UsuarioController();
 const controller = new NotasCorteController();
 const favoritoController = new FavoritoController();
 const notificacaoController = new NotificacaoController();
+const authController = new AuthController();
 const routes = Router();
 
 // Rotas públicas (pesquisa de notas de corte é livre). Sem autenticação
@@ -22,7 +23,8 @@ routes.get("/stats", limiterBusca, (req, res) => new UsuarioController().getDash
 
 // Autenticação — limites mais apertados: /login contra força bruta de
 // senha, /usuarios contra criação automatizada de contas.
-routes.post("/login", limiterLogin, new AuthController().login);
+routes.post("/login", limiterLogin, authController.login);
+routes.post("/login/google", limiterLogin, authController.loginGoogle);
 routes.post("/usuarios", limiterCadastro, usuarioController.create);
 
 // Rotas protegidas (exigem token válido e dono do recurso)

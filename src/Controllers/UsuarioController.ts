@@ -20,7 +20,7 @@ export const MODALIDADES_VALIDAS = [
 // Configuração padrão criada pra todo usuário novo, e usada como base ao
 // editar as configurações de alguém que ainda não tinha uma linha em
 // app_configuracoes (contas criadas antes desse recurso existir).
-const CONFIG_PADRAO = {
+export const CONFIG_PADRAO = {
     notif_cursos: false,
     notif_atualizacoes: false,
     notif_mensagens: false,

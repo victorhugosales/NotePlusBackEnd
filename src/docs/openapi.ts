@@ -233,6 +233,52 @@ export const openApiSpec = {
                 },
             },
         },
+        "/login/google": {
+            post: {
+                tags: ["Autenticação"],
+                summary: "Login/cadastro via Google (Google Identity Services)",
+                description:
+                    "Recebe o `credential` (ID token JWT) devolvido pelo Google Identity Services no navegador. Valida a assinatura e a audiência contra GOOGLE_CLIENT_ID, sem precisar de client secret. Se o e-mail já existir, faz login (linkando a conta Google); senão, cria uma conta nova sem senha.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["credential"],
+                                properties: { credential: { type: "string", description: "ID token JWT do Google" } },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: "Autenticado com sucesso",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        token: { type: "string" },
+                                        user: {
+                                            type: "object",
+                                            properties: {
+                                                id: { type: "integer" },
+                                                nome: { type: "string" },
+                                                email: { type: "string" },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    400: { description: "credential não informado, ou GOOGLE_CLIENT_ID não configurado no servidor", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    401: { description: "Token do Google inválido/expirado, ou e-mail não verificado", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
         "/usuarios": {
             post: {
                 tags: ["Autenticação"],

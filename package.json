@@ -23,6 +23,7 @@
         "exceljs": "^4.4.0",
         "express": "^5.2.1",
         "express-rate-limit": "^8.6.2",
+        "google-auth-library": "^11.0.2",
         "jsonwebtoken": "^9.0.3",
         "lru-cache": "^11.5.2",
         "mssql": "^12.2.0",

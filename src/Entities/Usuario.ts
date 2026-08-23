@@ -12,11 +12,24 @@ export class Usuario {
   @Column()
   email!: string;
 
-  @Column()
-  senha_hash!: string;
+  // Nula para contas criadas via login social (Google) — não têm senha
+  // nossa, só o link com a conta Google.
+  //
+  // "type" precisa ser explícito aqui: com o tipo TS em união com null
+  // (string | null), o reflect-metadata não consegue inferir um tipo único
+  // pro TypeORM, e ele tenta mapear a coluna como "Object" — que o driver
+  // do Postgres não reconhece (DataTypeNotSupportedError). Colunas opcionais
+  // sem "| null" (só "?") não têm esse problema, só as que aceitam null.
+  @Column({ type: "varchar", nullable: true })
+  senha_hash?: string | null;
 
   @Column()
   avatar_url!: string;
+
+  // Identificador da conta Google vinculada (claim "sub" do token),
+  // null para contas criadas com e-mail/senha que nunca linkaram o Google.
+  @Column({ type: "varchar", nullable: true, unique: true })
+  google_id?: string | null;
 
   @Column()
   buscas_realizadas!: number;
