@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import "dotenv/config";
-import ExcelJS from "exceljs";
+import { readFile } from "fs/promises";
 import { AppDataSource } from "../database/datasource";
+import { abrirPlanilha, validarLinhas, PlanilhaInvalidaError, LinhaValida } from "../services/importacaoNotas";
 
 // Importa uma planilha de notas de corte do SISU/INEP (formato do Portal
 // Único de Acesso) para a tabela NotasDeCortes, normalizando o ano.
@@ -18,36 +19,36 @@ import { AppDataSource } from "../database/datasource";
 // pra manter a mesma semântica usada nos dados já importados (EDICAO/ano =
 // ano civil), sem o que os filtros e a priorização por ano quebrariam.
 //
-// A coluna QT_VAGAS_CONCORRENCIA da planilha é gravada na coluna física
-// QT_VAGAS_OFERTADAS (nome usado nas edições anteriores e por toda a busca
-// hoje) — são tratadas como o mesmo conceito entre edições do MEC.
-//
 // --force permite importar mesmo que já existam linhas com esse ano no
 // banco (não apaga as existentes, só adiciona mais).
-
-const COLUNAS_PLANILHA = [
-  "EDICAO", "CO_IES", "NO_IES", "SG_IES", "DS_ORGANIZACAO_ACADEMICA",
-  "DS_CATEGORIA_ADM", "NO_CAMPUS", "NO_MUNICIPIO_CAMPUS", "SG_UF_CAMPUS",
-  "DS_REGIAO_CAMPUS", "CO_IES_CURSO", "NO_CURSO", "DS_GRAU", "DS_TURNO",
-  "TP_MOD_CONCORRENCIA", "TIPO_CONCORRENCIA", "DS_MOD_CONCORRENCIA",
-  "NU_PERCENTUAL_BONUS", "QT_VAGAS_CONCORRENCIA", "NU_NOTACORTE", "QT_INSCRICAO"
-];
+//
+// Parsing e validação de linhas ficam em src/services/importacaoNotas.ts,
+// compartilhado com a rota de importação usada pelo admin na interface.
 
 const TAMANHO_LOTE = 500;
 
-function getText(row: ExcelJS.Row, colIndex: Record<string, number>, coluna: string): string {
-  const idx = colIndex[coluna];
-  if (!idx) return "";
-  const texto = row.getCell(idx).text;
-  return texto ? texto.toString().trim() : "";
-}
+async function inserirLote(lote: LinhaValida[]) {
+  if (lote.length === 0) return;
 
-function getNumber(row: ExcelJS.Row, colIndex: Record<string, number>, coluna: string): number {
-  const idx = colIndex[coluna];
-  if (!idx) return 0;
-  const cell = row.getCell(idx);
-  const valor = typeof cell.value === "number" ? cell.value : Number(cell.text);
-  return Number.isFinite(valor) ? valor : 0;
+  const placeholders: string[] = [];
+  const valores: unknown[] = [];
+  lote.forEach(({ valores: linha }, i) => {
+    const base = i * linha.length;
+    placeholders.push(`(${linha.map((_, j) => `$${base + j + 1}`).join(", ")})`);
+    valores.push(...linha);
+  });
+
+  const sql = `
+    INSERT INTO "NotasDeCortes" (
+      "EDICAO", "CO_IES", "NO_IES", "SG_IES", "DS_ORGANIZACAO_ACADEMICA",
+      "DS_CATEGORIA_ADM", "NO_CAMPUS", "NO_MUNICIPIO_CAMPUS", "SG_UF_CAMPUS",
+      "DS_REGIAO_CAMPUS", "CO_IES_CURSO", "NO_CURSO", "DS_GRAU", "DS_TURNO",
+      "TP_MOD_CONCORRENCIA", "TIPO_CONCORRENCIA", "DS_MOD_CONCORRENCIA",
+      "NU_PERCENTUAL_BONUS", "QT_VAGAS_OFERTADAS", "NU_NOTACORTE", "QT_INSCRICAO"
+    ) VALUES ${placeholders.join(", ")}
+  `;
+
+  await AppDataSource.query(sql, valores);
 }
 
 async function main() {
@@ -82,96 +83,37 @@ async function main() {
     }
 
     console.log(`Lendo ${arquivo}...`);
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(arquivo);
+    const buffer = await readFile(arquivo);
+    const { sheet, colIndex } = await abrirPlanilha(buffer);
 
-    const sheet = workbook.worksheets.find(
-      (ws) => ws.rowCount > 1 && (ws.getRow(1).getCell(1).text || "").trim() === "EDICAO"
-    );
-    if (!sheet) {
-      console.error('Não encontrei nenhuma aba com cabeçalho "EDICAO" na primeira coluna.');
-      process.exit(1);
+    const { totalLinhas, validas, comErro } = validarLinhas(sheet, colIndex, ano);
+    console.log(`${totalLinhas} linhas encontradas (${validas.length} válidas, ${comErro.length} com erro).`);
+
+    if (comErro.length > 0) {
+      console.warn("Linhas ignoradas por erro de validação:");
+      for (const { linha, erros } of comErro.slice(0, 20)) {
+        console.warn(`  linha ${linha}: ${erros.join("; ")}`);
+      }
+      if (comErro.length > 20) console.warn(`  ... e mais ${comErro.length - 20} linha(s).`);
     }
 
-    const colIndex: Record<string, number> = {};
-    sheet.getRow(1).eachCell((cell, colNumber) => {
-      colIndex[(cell.text || "").trim()] = colNumber;
+    console.log(`Importando ${validas.length} linhas com EDICAO=${ano}...`);
+
+    await AppDataSource.transaction(async () => {
+      for (let i = 0; i < validas.length; i += TAMANHO_LOTE) {
+        const lote = validas.slice(i, i + TAMANHO_LOTE);
+        await inserirLote(lote);
+        console.log(`  ${Math.min(i + TAMANHO_LOTE, validas.length)}/${validas.length} linhas importadas...`);
+      }
     });
 
-    const faltando = COLUNAS_PLANILHA.filter((c) => !(c in colIndex));
-    if (faltando.length > 0) {
-      console.error("Colunas esperadas não encontradas na planilha:", faltando.join(", "));
+    console.log(`Pronto: ${validas.length} linhas importadas com EDICAO=${ano}.`);
+  } catch (error) {
+    if (error instanceof PlanilhaInvalidaError) {
+      console.error(error.message);
       process.exit(1);
     }
-
-    const totalLinhas = sheet.rowCount - 1;
-    console.log(`${totalLinhas} linhas encontradas. Importando com EDICAO=${ano}...`);
-
-    let lote: unknown[][] = [];
-    let inseridas = 0;
-
-    const inserirLote = async () => {
-      if (lote.length === 0) return;
-
-      const placeholders: string[] = [];
-      const valores: unknown[] = [];
-      lote.forEach((linha, i) => {
-        const base = i * linha.length;
-        placeholders.push(`(${linha.map((_, j) => `$${base + j + 1}`).join(", ")})`);
-        valores.push(...linha);
-      });
-
-      const sql = `
-        INSERT INTO "NotasDeCortes" (
-          "EDICAO", "CO_IES", "NO_IES", "SG_IES", "DS_ORGANIZACAO_ACADEMICA",
-          "DS_CATEGORIA_ADM", "NO_CAMPUS", "NO_MUNICIPIO_CAMPUS", "SG_UF_CAMPUS",
-          "DS_REGIAO_CAMPUS", "CO_IES_CURSO", "NO_CURSO", "DS_GRAU", "DS_TURNO",
-          "TP_MOD_CONCORRENCIA", "TIPO_CONCORRENCIA", "DS_MOD_CONCORRENCIA",
-          "NU_PERCENTUAL_BONUS", "QT_VAGAS_OFERTADAS", "NU_NOTACORTE", "QT_INSCRICAO"
-        ) VALUES ${placeholders.join(", ")}
-      `;
-
-      await AppDataSource.query(sql, valores);
-      inseridas += lote.length;
-      lote = [];
-      console.log(`  ${inseridas}/${totalLinhas} linhas importadas...`);
-    };
-
-    for (let i = 2; i <= sheet.rowCount; i++) {
-      const row = sheet.getRow(i);
-      if (!row.hasValues) continue;
-
-      lote.push([
-        ano, // EDICAO normalizado (ver comentário no topo do arquivo)
-        getNumber(row, colIndex, "CO_IES"),
-        getText(row, colIndex, "NO_IES"),
-        getText(row, colIndex, "SG_IES"),
-        getText(row, colIndex, "DS_ORGANIZACAO_ACADEMICA"),
-        getText(row, colIndex, "DS_CATEGORIA_ADM"),
-        getText(row, colIndex, "NO_CAMPUS"),
-        getText(row, colIndex, "NO_MUNICIPIO_CAMPUS"),
-        getText(row, colIndex, "SG_UF_CAMPUS"),
-        getText(row, colIndex, "DS_REGIAO_CAMPUS"),
-        getNumber(row, colIndex, "CO_IES_CURSO"),
-        getText(row, colIndex, "NO_CURSO"),
-        getText(row, colIndex, "DS_GRAU"),
-        getText(row, colIndex, "DS_TURNO"),
-        getText(row, colIndex, "TP_MOD_CONCORRENCIA"),
-        getText(row, colIndex, "TIPO_CONCORRENCIA"),
-        getText(row, colIndex, "DS_MOD_CONCORRENCIA"),
-        getNumber(row, colIndex, "NU_PERCENTUAL_BONUS"),
-        getNumber(row, colIndex, "QT_VAGAS_CONCORRENCIA"), // -> QT_VAGAS_OFERTADAS
-        getNumber(row, colIndex, "NU_NOTACORTE"),
-        getNumber(row, colIndex, "QT_INSCRICAO"),
-      ]);
-
-      if (lote.length >= TAMANHO_LOTE) {
-        await inserirLote();
-      }
-    }
-    await inserirLote();
-
-    console.log(`Pronto: ${inseridas} linhas importadas com EDICAO=${ano}.`);
+    throw error;
   } finally {
     await AppDataSource.destroy();
   }

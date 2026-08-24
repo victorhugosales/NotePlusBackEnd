@@ -5,6 +5,7 @@ import { Usuario } from "../Entities/Usuario";
 import { UsuarioConfig } from "../Entities/UsuarioConfig";
 import { Favorito } from "../Entities/Favorito";
 import { Notificacao } from "../Entities/Notificacao";
+import { ImportacaoNotas } from "../Entities/ImportacaoNotas";
 import "dotenv/config";
 
 // APP_ENV escolhe qual bloco de credenciais do .env usar, sem precisar de
@@ -52,7 +53,7 @@ export const AppDataSource = new DataSource({
     database: requiredEnv(`${prefix}_TYPEORM_DATABASE`),
     synchronize: false,
     logging: true,
-    entities: [NotasCorte, Usuario, UsuarioConfig, Favorito, Notificacao],
+    entities: [NotasCorte, Usuario, UsuarioConfig, Favorito, Notificacao, ImportacaoNotas],
     migrations: [],
     subscribers: [],
     extra: {

@@ -41,6 +41,18 @@ export const limiterRecuperacaoSenha = rateLimit({
   message: { error: "Muitas solicitações de redefinição de senha. Aguarde um pouco e tente de novo." },
 });
 
+// Importação de planilhas (área do admin): analisar/confirmar processam um
+// arquivo inteiro, então o limite é baixo mais por proteção contra uso
+// acidental (double-click, script) do que por ataque — a rota já exige
+// admin autenticado.
+export const limiterImportacao = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas importações em pouco tempo. Aguarde um instante e tente de novo." },
+});
+
 // /usuarios (cadastro): evita criação automatizada de contas em massa.
 export const limiterCadastro = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hora

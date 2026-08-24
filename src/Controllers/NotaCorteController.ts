@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../database/datasource";
 import { NotasCorte } from "../Entities/NotasCorte";
 import { Like, ILike, Raw } from "typeorm";
-import { pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY } from "../cache/searchCache";
+import { pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY, anosCache, ANOS_CACHE_KEY } from "../cache/searchCache";
 
 // A coluna QT_VAGAS_OFERTADAS não tem o mesmo tipo em todos os ambientes
 // (varchar em alguns bancos, numeric/integer em outros, resquício da forma
@@ -265,6 +265,34 @@ export class NotasCorteController {
     } catch (error) {
       console.error("Erro no Banco:", error);
       return res.status(500).json({ error: "Erro ao buscar sugestões" });
+    }
+  }
+
+  // Edições do SISU com dados no banco, mais recente primeiro. O front usa
+  // isso pra montar os seletores de ano dinamicamente — nada fica fixo no
+  // código, então uma edição nova (ou antiga) aparece assim que for
+  // importada, sem precisar tocar em nenhuma tela.
+  async anosDisponiveis(_req: Request, res: Response) {
+    const cached = anosCache.get(ANOS_CACHE_KEY);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const linhas = await AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.ano", "ano")
+        .orderBy("nota.ano", "DESC")
+        .getRawMany();
+
+      const anos = linhas.map((l) => Number(l.ano));
+      anosCache.set(ANOS_CACHE_KEY, anos);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(anos);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar anos disponíveis" });
     }
   }
 }

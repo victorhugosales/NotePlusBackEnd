@@ -170,7 +170,8 @@ export class UsuarioController {
                 user: {
                     id: novoUsuario.id,
                     nome: novoUsuario.nome,
-                    email: novoUsuario.email
+                    email: novoUsuario.email,
+                    is_admin: false
                 }
             });
         } catch (error) {

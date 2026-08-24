@@ -63,6 +63,11 @@ export class Usuario {
   @Column({ type: "timestamp", nullable: true })
   reset_token_expira_em?: Date | null;
 
+  // Acesso à área administrativa (ex.: importação de planilhas de notas de
+  // corte). Promovido direto no banco — não existe fluxo de auto-promoção.
+  @Column({ default: false })
+  is_admin!: boolean;
+
   @OneToOne(() => UsuarioConfig, (config) => config.usuario)
   configuracoes!: UsuarioConfig;
 }

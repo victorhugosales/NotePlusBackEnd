@@ -28,3 +28,14 @@ export const pesquisaCache = new LRUCache<string, any>({
   max: 200,
   ttl: 1000 * 60 * 5, // 5 minutos
 });
+
+// /anos-disponiveis: lista de EDICAO distintas na tabela — usada pelo front
+// pra montar os seletores de ano dinamicamente (nada de lista fixa no
+// código). Mesmo padrão do statsCache: só muda quando uma importação roda,
+// e ImportacaoController.confirmar invalida essa chave (e a de stats) assim
+// que uma importação é confirmada, pra não esperar os 30 minutos de TTL.
+export const anosCache = new LRUCache<string, any>({
+  max: 1,
+  ttl: 1000 * 60 * 30, // 30 minutos
+});
+export const ANOS_CACHE_KEY = "anos-disponiveis";

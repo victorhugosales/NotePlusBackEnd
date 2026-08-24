@@ -18,6 +18,7 @@ export const openApiSpec = {
         { name: "Usuário", description: "Perfil do usuário logado" },
         { name: "Favoritos", description: "Cursos favoritados pelo usuário logado" },
         { name: "Notificações", description: "Notificações do usuário logado" },
+        { name: "Admin", description: "Área restrita a administradores — importação de planilhas de notas de corte" },
     ],
     components: {
         securitySchemes: {
@@ -184,6 +185,20 @@ export const openApiSpec = {
                                 },
                             },
                         },
+                    },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/anos-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Edições do SISU com dados no banco, mais recente primeiro",
+                description: "Usado pelo front pra montar os seletores de ano dinamicamente — reflete o que foi importado, sem lista fixa no código.",
+                responses: {
+                    200: {
+                        description: "Lista de anos",
+                        content: { "application/json": { schema: { type: "array", items: { type: "integer" }, example: [2026, 2025, 2024] } } },
                     },
                     429: { $ref: "#/components/responses/MuitasRequisicoes" },
                 },
@@ -539,6 +554,109 @@ export const openApiSpec = {
                     401: { $ref: "#/components/responses/NaoAutorizado" },
                     403: { description: "Notificação pertence a outro usuário" },
                     404: { description: "Notificação não encontrada" },
+                },
+            },
+        },
+        "/admin/importacoes/analisar": {
+            post: {
+                tags: ["Admin"],
+                summary: "Analisa uma planilha de notas de corte sem gravar nada (dry-run)",
+                description:
+                    "Faz o parsing e valida linha a linha (campos obrigatórios, UF válida, nota entre 0–1000, etc.). Não grava no banco — devolve um relatório pro admin revisar antes de confirmar.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "multipart/form-data": {
+                            schema: {
+                                type: "object",
+                                required: ["arquivo", "ano"],
+                                properties: {
+                                    arquivo: { type: "string", format: "binary", description: "Planilha .xlsx do SISU/INEP" },
+                                    ano: { type: "integer", description: "Ano civil a gravar (independe do código EDICAO bruto da planilha)" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: "Relatório da análise",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        totalLinhas: { type: "integer" },
+                                        totalValidas: { type: "integer" },
+                                        totalComErro: { type: "integer" },
+                                        erros: {
+                                            type: "array",
+                                            description: "Até 100 primeiras linhas com erro",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    linha: { type: "integer" },
+                                                    erros: { type: "array", items: { type: "string" } },
+                                                },
+                                            },
+                                        },
+                                        anoJaTemDados: { type: "boolean" },
+                                        totalLinhasExistentes: { type: "integer" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    400: { description: "Arquivo/ano ausente ou planilha com estrutura inválida", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    401: { $ref: "#/components/responses/NaoAutorizado" },
+                    403: { description: "Usuário autenticado não é admin" },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/admin/importacoes/confirmar": {
+            post: {
+                tags: ["Admin"],
+                summary: "Confirma a importação da planilha (grava no banco, dentro de uma transação)",
+                description:
+                    "Reprocessa o mesmo arquivo enviado em /analisar (nada fica guardado no servidor entre os dois passos) e grava as linhas válidas. Se já existir dado pro ano e `substituir` não for true, recusa com 409.",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "multipart/form-data": {
+                            schema: {
+                                type: "object",
+                                required: ["arquivo", "ano"],
+                                properties: {
+                                    arquivo: { type: "string", format: "binary" },
+                                    ano: { type: "integer" },
+                                    substituir: { type: "boolean", description: "Apaga os dados existentes do ano antes de inserir os novos" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: { description: "Importação concluída" },
+                    400: { description: "Arquivo/ano ausente ou planilha com estrutura inválida", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    401: { $ref: "#/components/responses/NaoAutorizado" },
+                    403: { description: "Usuário autenticado não é admin" },
+                    409: { description: "Ano já tem dados e substituir não foi confirmado", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/admin/importacoes": {
+            get: {
+                tags: ["Admin"],
+                summary: "Histórico das últimas 50 importações confirmadas",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                    200: { description: "Lista de importações" },
+                    401: { $ref: "#/components/responses/NaoAutorizado" },
+                    403: { description: "Usuário autenticado não é admin" },
                 },
             },
         },
