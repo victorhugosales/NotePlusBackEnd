@@ -4,9 +4,9 @@
 
 # Contextualização do Projeto
 
-[cite_start]O **NotePlus+ Backend** é a camada de inteligência e processamento de dados da plataforma, desenvolvida para sustentar o ecossistema de análise de notas de corte do Sistema de Seleção Unificada (SISU)[cite: 14].
+O **NotePlus+ Backend** é a camada de inteligência e processamento de dados da plataforma, desenvolvida para sustentar o ecossistema de análise de notas de corte do Sistema de Seleção Unificada (SISU).
 
-[cite_start]A arquitetura foi projetada para resolver o problema de manipulação de microdados públicos e planilhas complexas (como arquivos `.xlsx` do MEC/INEP) [cite: 12, 15, 41][cite_start], centralizando e tratando essas informações em um banco de dados estruturado[cite: 93]. [cite_start]A API expõe endpoints otimizados que alimentam a interface pública, permitindo consultas rápidas, filtros avançados e cálculos estatísticos em tempo real para mitigar a volatilidade das notas[cite: 14, 16].
+A arquitetura foi projetada para resolver o problema de manipulação de microdados públicos e planilhas complexas (como arquivos `.xlsx` do MEC/INEP), centralizando e tratando essas informações em um banco de dados estruturado. A API expõe endpoints otimizados que alimentam a interface pública, permitindo consultas rápidas, filtros avançados e cálculos estatísticos em tempo real para mitigar a volatilidade das notas.
 
 O desenvolvimento foi guiado por princípios de engenharia de software para garantir escalabilidade, integridade dos dados históricos e segurança na comunicação com o cliente.
 
@@ -16,10 +16,10 @@ O desenvolvimento foi guiado por princípios de engenharia de software para gara
 
 O ecossistema do backend foi construído para fornecer uma base sólida de dados educacionais, respondendo por:
 
-- [cite_start]**Processamento e ETL:** Importação, limpeza e segmentação de microdados oficiais do SISU/INEP por instituição, campus, curso e modalidade[cite: 55, 92, 93].
-- [cite_start]**Cálculos Estatísticos (Estatística Descritiva):** Implementação de lógica para calcular Média Aritmética, Moda e Mediana das notas históricas para identificar padrões de aprovação[cite: 94, 97, 98, 99, 100].
-- [cite_start]**Endpoints de Busca Avançada:** Filtros dinâmicos que viabilizam a comparação imediata entre ampla concorrência (AC) e o sistema de cotas (Lei nº 12.711/2012)[cite: 58, 78].
-- [cite_start]**Agregação Histórica:** Estruturação de dados interanuais para permitir que a interface trace gráficos de tendências e evolução das notas[cite: 16, 56, 59].
+- **Processamento e ETL:** Importação, limpeza e segmentação de microdados oficiais do SISU/INEP por instituição, campus, curso e modalidade.
+- **Cálculos Estatísticos (Estatística Descritiva):** Implementação de lógica para calcular Média Aritmética, Moda e Mediana das notas históricas para identificar padrões de aprovação.
+- **Endpoints de Busca Avançada:** Filtros dinâmicos que viabilizam a comparação imediata entre ampla concorrência (AC) e o sistema de cotas (Lei nº 12.711/2012).
+- **Agregação Histórica:** Estruturação de dados interanuais para permitir que a interface trace gráficos de tendências e evolução das notas.
 
 ---
 
@@ -57,13 +57,13 @@ No escopo de backend, o desenvolvimento do NotePlus+ foca em consolidar boas pr�
 
 Para as próximas iterações da API, estão previstas:
 
-- [cite_start]Mecanismo automatizado de ingestão/parse de novos arquivos `.xlsx` do Portal Único de Acesso[cite: 41].
-- [cite_start]Criação de endpoints preditivos utilizando algoritmos simples de tendência para simular notas futuras[cite: 59].
+- Mecanismo automatizado de ingestão/parse de novos arquivos `.xlsx` do Portal Único de Acesso.
+- Criação de endpoints preditivos utilizando algoritmos simples de tendência para simular notas futuras.
 - Implementação de camadas de *caching* (como Redis) para os endpoints de estatísticas históricas mais acessados.
-- [cite_start]Integração direta com APIs governamentais caso fiquem disponíveis[cite: 57].
+- Integração direta com APIs governamentais caso fiquem disponíveis.
 
 ---
 
 # Autor
 
-[cite_start]Projeto desenvolvido por **Victor Hugo Sales Paz** [cite: 6][cite_start], acadêmico de Análise e Desenvolvimento de Sistemas na Faculdade Princesa do Oeste[cite: 9].
+Projeto desenvolvido por **Victor Hugo Sales Paz** , acadêmico de Análise e Desenvolvimento de Sistemas na Faculdade Princesa do Oeste.
