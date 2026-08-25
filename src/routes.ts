@@ -35,6 +35,10 @@ routes.get("/pesquisar", limiterBusca, new NotasCorteController().search);
 routes.get("/sugestoes", limiterBusca, controller.suggestions);
 routes.get("/stats", limiterBusca, (req, res) => new UsuarioController().getDashboardStats(req, res));
 routes.get("/anos-disponiveis", limiterBusca, controller.anosDisponiveis);
+routes.get("/estados-disponiveis", limiterBusca, controller.estadosDisponiveis);
+routes.get("/municipios-disponiveis", limiterBusca, controller.municipiosDisponiveis);
+routes.get("/instituicoes-disponiveis", limiterBusca, controller.instituicoesDisponiveis);
+routes.get("/cursos-disponiveis", limiterBusca, controller.cursosDisponiveis);
 
 // Autenticação — limites mais apertados: /login contra força bruta de
 // senha, /usuarios contra criação automatizada de contas.

@@ -30,14 +30,20 @@ import { MigrationInterface, QueryRunner } from "typeorm";
  *
  * Partições de anos novos (ex.: SISU 2027) são criadas automaticamente na
  * importação (ver ImportacaoController.confirmar) — não é preciso rodar
- * uma migration nova a cada edição.
+ * uma migration nova a cada edição. Como rede de segurança para qualquer
+ * INSERT que fuja desse fluxo (ex.: script manual/SQL editor), também existe
+ * uma partição DEFAULT ("NotasDeCortes_default") — sem ela, um EDICAO sem
+ * partição própria faria o INSERT falhar em vez de simplesmente cair ali.
  *
- * ATENÇÃO ao rodar em homologação/produção (Supabase): os CREATE INDEX ao
- * final não usam CONCURRENTLY (não é possível dentro de uma transação) e
- * travam escrita na tabela enquanto rodam. Para o volume de dados do SISU
- * isso deve ser rápido, mas prefira rodar fora do horário de pico e faça
- * um backup manual antes, especialmente em produção — down() é melhor
- * esforço, não substitui um backup real.
+ * ATENÇÃO ao rodar em homologação/produção (Supabase): o próprio RENAME TABLE
+ * já pega ACCESS EXCLUSIVE lock na tabela e, como a migration inteira roda
+ * numa única transação (padrão do TypeORM), esse lock fica retido até o
+ * COMMIT — ou seja, a tabela fica bloqueada (leitura e escrita, não só
+ * escrita) do início ao fim da migration, não apenas durante os CREATE
+ * INDEX finais. Para o volume de dados do SISU isso deve ser rápido, mas
+ * prefira rodar fora do horário de pico e faça um backup manual antes,
+ * especialmente em produção — down() é melhor esforço, não substitui um
+ * backup real.
  */
 export class ParticionarNotasDeCortes1756137600000 implements MigrationInterface {
   name = "ParticionarNotasDeCortes1756137600000";
@@ -74,6 +80,15 @@ export class ParticionarNotasDeCortes1756137600000 implements MigrationInterface
           );
         END LOOP;
       END $$;
+    `);
+
+    // Partição DEFAULT: rede de segurança contra INSERT direto (fora do
+    // fluxo do ImportacaoController, que sempre cria a partição do ano
+    // antes de inserir) com um EDICAO sem partição própria — sem isso, o
+    // INSERT falharia com "no partition of relation found for row" em vez
+    // de simplesmente cair aqui.
+    await queryRunner.query(`
+      CREATE TABLE "NotasDeCortes_default" PARTITION OF "NotasDeCortes" DEFAULT
     `);
 
     // Copia os dados — o Postgres roteia cada linha pra partição certa
@@ -132,10 +147,13 @@ export class ParticionarNotasDeCortes1756137600000 implements MigrationInterface
     // IDENTITY, começando do 1) — sincroniza com o maior id_projeto
     // copiado, senão a próxima inserção via identity colide com um ID
     // já existente. Mesmo padrão de 004_fix_id_projeto_identity.sql.
+    // COALESCE(..., 1) porque MAX(id_projeto) vem NULL se a tabela estiver
+    // vazia (ex.: rodando esta migration num Postgres local do zero, antes
+    // de qualquer importação) — setval com NULL lançaria erro.
     await queryRunner.query(`
       SELECT setval(
         pg_get_serial_sequence('"NotasDeCortes"', 'id_projeto'),
-        (SELECT MAX(id_projeto) FROM "NotasDeCortes")
+        COALESCE((SELECT MAX(id_projeto) FROM "NotasDeCortes"), 1)
       )
     `);
   }
@@ -199,10 +217,12 @@ export class ParticionarNotasDeCortes1756137600000 implements MigrationInterface
         ON "NotasDeCortes" ("EDICAO")
     `);
 
+    // COALESCE(..., 1) pelo mesmo motivo do up(): MAX(id_projeto) vem NULL
+    // se a tabela estiver vazia.
     await queryRunner.query(`
       SELECT setval(
         pg_get_serial_sequence('"NotasDeCortes"', 'id_projeto'),
-        (SELECT MAX(id_projeto) FROM "NotasDeCortes")
+        COALESCE((SELECT MAX(id_projeto) FROM "NotasDeCortes"), 1)
       )
     `);
   }

@@ -39,3 +39,24 @@ export const anosCache = new LRUCache<string, any>({
   ttl: 1000 * 60 * 30, // 30 minutos
 });
 export const ANOS_CACHE_KEY = "anos-disponiveis";
+
+// Listas completas para os filtros em cascata da Home (estado -> município
+// ou instituição -> cursos). Mesmo racional do anosCache: mudam só quando
+// uma importação roda, TTL longo. Chave inclui os parâmetros (ano, uf)
+// porque cada combinação tem sua própria lista.
+export const estadosCache = new LRUCache<string, any>({
+  max: 20, // poucas edições do SISU convivem na tabela ao mesmo tempo
+  ttl: 1000 * 60 * 30,
+});
+export const municipiosCache = new LRUCache<string, any>({
+  max: 200, // 27 UFs x poucas edições
+  ttl: 1000 * 60 * 30,
+});
+export const instituicoesCache = new LRUCache<string, any>({
+  max: 200,
+  ttl: 1000 * 60 * 30,
+});
+export const cursosCache = new LRUCache<string, any>({
+  max: 20,
+  ttl: 1000 * 60 * 30,
+});

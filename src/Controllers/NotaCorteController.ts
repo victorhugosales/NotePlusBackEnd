@@ -2,7 +2,10 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../database/datasource";
 import { NotasCorte } from "../Entities/NotasCorte";
 import { Like, ILike, Raw } from "typeorm";
-import { pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY, anosCache, ANOS_CACHE_KEY } from "../cache/searchCache";
+import {
+  pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY, anosCache, ANOS_CACHE_KEY,
+  estadosCache, municipiosCache, instituicoesCache, cursosCache,
+} from "../cache/searchCache";
 
 // A coluna QT_VAGAS_OFERTADAS não tem o mesmo tipo em todos os ambientes
 // (varchar em alguns bancos, numeric/integer em outros, resquício da forma
@@ -169,7 +172,7 @@ export class NotasCorteController {
       // Página de Instituições (apenas universidade)
       else if (universidade) {
 
-        const resultados = await repo
+        const resultadosQuery = repo
           .createQueryBuilder("nota")
           .select([
             "nota.curso AS curso",
@@ -183,12 +186,24 @@ export class NotasCorteController {
             `${SUM_VAGAS} AS vagas`
           ])
           .where(
-            `
+            `(
         nota.sigla_universidade ILIKE :universidade
         OR nota.nome_universidade ILIKE :universidade
-        `,
+        )`,
             { universidade: `%${universidade}%` }
-          )
+          );
+
+        // Precisa dos parênteses acima: sem eles, "A OR B AND ano" vira
+        // "A OR (B AND ano)" (AND tem precedência sobre OR em SQL) — o
+        // filtro de ano seria ignorado sempre que a sigla batesse sozinha
+        // (mesmo cuidado já tomado no branch "global" abaixo). Sem isso,
+        // com 2024/2025/2026 convivendo na mesma tabela, os resultados de
+        // uma instituição misturariam edições diferentes do SISU.
+        if (ano) {
+          resultadosQuery.andWhere("nota.ano = :ano", { ano: String(ano) });
+        }
+
+        const resultados = await resultadosQuery
           .groupBy("nota.curso")
           .addGroupBy("nota.codigo_curso")
           .addGroupBy("nota.sigla_universidade")
@@ -198,6 +213,49 @@ export class NotasCorteController {
           .addGroupBy("nota.grau")
           .addGroupBy("nota.turno")
           .orderBy("nota.curso", "ASC")
+          .limit(200)
+          .getRawMany();
+
+        return respond(resultados);
+      }
+      // Filtro por município (modal em cascata da Home: estado -> município
+      // -> cursos oferecidos ali). Igualdade exata, não ILIKE: o valor vem
+      // direto de /municipios-disponiveis, não é digitado pelo usuário.
+      else if (cidade) {
+        const query = repo
+          .createQueryBuilder("nota")
+          .select([
+            "nota.curso AS curso",
+            "nota.codigo_curso AS codigo_curso",
+            "nota.sigla_universidade AS sigla_universidade",
+            "nota.nome_universidade AS nome_universidade",
+            "nota.uf_campus AS uf_campus",
+            "nota.cidade AS cidade",
+            "nota.campus AS campus",
+            "nota.grau AS grau",
+            "nota.turno AS turno",
+            `${SUM_VAGAS} AS vagas`
+          ])
+          .where("nota.cidade = :cidade", { cidade: String(cidade) });
+
+        if (uf) {
+          query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+        }
+        if (ano) {
+          query.andWhere("nota.ano = :ano", { ano: String(ano) });
+        }
+
+        const resultados = await query
+          .groupBy("nota.curso")
+          .addGroupBy("nota.codigo_curso")
+          .addGroupBy("nota.sigla_universidade")
+          .addGroupBy("nota.nome_universidade")
+          .addGroupBy("nota.uf_campus")
+          .addGroupBy("nota.cidade")
+          .addGroupBy("nota.campus")
+          .addGroupBy("nota.grau")
+          .addGroupBy("nota.turno")
+          .orderBy("vagas", "DESC")
           .limit(200)
           .getRawMany();
 
@@ -265,6 +323,124 @@ export class NotasCorteController {
     } catch (error) {
       console.error("Erro no Banco:", error);
       return res.status(500).json({ error: "Erro ao buscar sugestões" });
+    }
+  }
+
+  // Listas completas (não autocomplete, sem limit) para os filtros em
+  // cascata da Home: estado -> município/instituição -> cursos. Diferente
+  // de /sugestoes, não exigem termo de busca.
+
+  async estadosDisponiveis(req: Request, res: Response) {
+    const { ano } = req.query;
+    const cacheKey = `estados:${ano || "todos"}`;
+    const cached = estadosCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.uf_campus", "uf");
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.uf_campus", "ASC").getRawMany();
+      const estados = linhas.map((l) => l.uf).filter(Boolean);
+
+      estadosCache.set(cacheKey, estados);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(estados);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar estados disponíveis" });
+    }
+  }
+
+  async municipiosDisponiveis(req: Request, res: Response) {
+    const { uf, ano } = req.query;
+    if (!uf) return res.status(400).json({ error: "Informe o parâmetro uf" });
+
+    const cacheKey = `municipios:${String(uf).toUpperCase()}:${ano || "todos"}`;
+    const cached = municipiosCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.cidade", "municipio")
+        .where("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.cidade", "ASC").getRawMany();
+      const municipios = linhas.map((l) => l.municipio).filter(Boolean);
+
+      municipiosCache.set(cacheKey, municipios);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(municipios);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar municípios disponíveis" });
+    }
+  }
+
+  async instituicoesDisponiveis(req: Request, res: Response) {
+    const { uf, ano } = req.query;
+    if (!uf) return res.status(400).json({ error: "Informe o parâmetro uf" });
+
+    const cacheKey = `instituicoes:${String(uf).toUpperCase()}:${ano || "todos"}`;
+    const cached = instituicoesCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select(["DISTINCT nota.nome_universidade AS nome", "nota.sigla_universidade AS sigla"])
+        .where("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.nome_universidade", "ASC").getRawMany();
+      const instituicoes = linhas.map((l) => ({ nome: l.nome, sigla: l.sigla })).filter((i) => i.nome);
+
+      instituicoesCache.set(cacheKey, instituicoes);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(instituicoes);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar instituições disponíveis" });
+    }
+  }
+
+  async cursosDisponiveis(req: Request, res: Response) {
+    const { ano } = req.query;
+    const cacheKey = `cursos:${ano || "todos"}`;
+    const cached = cursosCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.curso", "curso");
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.curso", "ASC").getRawMany();
+      const cursos = linhas.map((l) => l.curso).filter(Boolean);
+
+      cursosCache.set(cacheKey, cursos);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(cursos);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar cursos disponíveis" });
     }
   }
 
