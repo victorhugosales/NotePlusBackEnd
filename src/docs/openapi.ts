@@ -215,7 +215,15 @@ export const openApiSpec = {
                             schema: {
                                 type: "object",
                                 required: ["email", "senha"],
-                                properties: { email: { type: "string" }, senha: { type: "string" } },
+                                properties: {
+                                    email: { type: "string" },
+                                    senha: { type: "string" },
+                                    lembrar: {
+                                        type: "boolean",
+                                        default: true,
+                                        description: "\"Lembrar de mim\": true emite um token de vida longa (JWT_EXPIRES_IN, padrão 7d); false emite um token de vida curta (JWT_EXPIRES_IN_SEM_LEMBRAR, padrão 12h). Omitido é tratado como true.",
+                                    },
+                                },
                             },
                         },
                     },

@@ -19,7 +19,7 @@ function hashToken(token: string): string {
 
 export class AuthController {
     async login(req: Request, res: Response) {
-        const { email, senha } = req.body;
+        const { email, senha, lembrar } = req.body;
 
         if (!email || !senha) {
             return res.status(400).json({ error: "Informe e-mail e senha" });
@@ -44,7 +44,7 @@ export class AuthController {
                 return res.status(401).json({ error: "Senha incorreta" });
             }
 
-            const token = signToken({ id: usuario.id, email: usuario.email });
+            const token = signToken({ id: usuario.id, email: usuario.email }, lembrar !== false);
 
             return res.json({
                 token,
