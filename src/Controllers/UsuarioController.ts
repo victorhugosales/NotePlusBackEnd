@@ -95,6 +95,13 @@ export class UsuarioController {
         const repo = AppDataSource.getRepository(Usuario);
 
         try {
+            if (email) {
+                const donoAtual = await repo.findOne({ where: { email } });
+                if (donoAtual && donoAtual.id !== Number(id)) {
+                    return res.status(409).json({ error: "Já existe uma conta com este e-mail" });
+                }
+            }
+
             const updateData: Partial<Usuario> = {};
             if (nome) updateData.nome = nome;
             if (email) updateData.email = email;

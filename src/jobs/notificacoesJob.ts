@@ -34,6 +34,22 @@ export async function gerarNotificacoesParaTodos() {
         .orWhere("config.notif_atualizacoes = true")
         .getMany();
 
+    // Não depende de nada específico de cada usuário (só do ano de
+    // referência), então roda uma vez só em vez de repetir a mesma query a
+    // cada iteração do loop abaixo.
+    const candidatosEmAlta = await notaRepo
+        .createQueryBuilder("nota")
+        .select("nota.curso", "curso")
+        .addSelect("nota.sigla_universidade", "sigla_universidade")
+        .addSelect("nota.nome_universidade", "nome_universidade")
+        .addSelect("nota.codigo_curso", "codigo_curso")
+        .addSelect("nota.inscritos", "inscritos")
+        .addSelect("nota.vagas", "vagas")
+        .where("nota.ano = :ano", { ano: ANO_REFERENCIA })
+        .orderBy("nota.inscritos", "DESC")
+        .limit(TOP_CURSOS_EM_ALTA)
+        .getRawMany();
+
     for (const config of usuariosComNotifAtiva) {
         try {
             const favoritos = await favoritoRepo.find({ where: { usuario_id: config.usuario_id } });
@@ -64,19 +80,6 @@ export async function gerarNotificacoesParaTodos() {
                     continue;
                 }
             }
-
-            const candidatosEmAlta = await notaRepo
-                .createQueryBuilder("nota")
-                .select("nota.curso", "curso")
-                .addSelect("nota.sigla_universidade", "sigla_universidade")
-                .addSelect("nota.nome_universidade", "nome_universidade")
-                .addSelect("nota.codigo_curso", "codigo_curso")
-                .addSelect("nota.inscritos", "inscritos")
-                .addSelect("nota.vagas", "vagas")
-                .where("nota.ano = :ano", { ano: ANO_REFERENCIA })
-                .orderBy("nota.inscritos", "DESC")
-                .limit(TOP_CURSOS_EM_ALTA)
-                .getRawMany();
 
             const escolhido = sorteiaUm(candidatosEmAlta);
             if (escolhido) {

@@ -52,11 +52,16 @@ export const AppDataSource = new DataSource({
     password: requiredEnv(`${prefix}_TYPEORM_PASSWORD`),
     database: requiredEnv(`${prefix}_TYPEORM_DATABASE`),
     synchronize: false,
-    logging: true,
+    // Logging de query só faz sentido enquanto se debuga localmente — em
+    // prod/homologação só polui os logs (e pode vazar dados de query).
+    logging: APP_ENV === "local",
     entities: [NotasCorte, Usuario, UsuarioConfig, Favorito, Notificacao, ImportacaoNotas],
     migrations: [],
     subscribers: [],
     extra: {
-        ssl: false
+        // Bancos gerenciados (prod e dev) exigem SSL; só o Postgres local
+        // não usa. rejectUnauthorized: false porque o certificado do
+        // provedor fica atrás de um pooler autoassinado.
+        ssl: APP_ENV === "local" ? false : { rejectUnauthorized: false }
     }
 })

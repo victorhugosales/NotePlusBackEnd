@@ -9,7 +9,7 @@ export class Usuario {
   @Column()
   nome!: string;
 
-  @Column()
+  @Column({ unique: true })
   email!: string;
 
   // Nula para contas criadas via login social (Google) — não têm senha
