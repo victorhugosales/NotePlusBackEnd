@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import path from "path";
 import { DataSource } from "typeorm";
 import { NotasCorte } from "../Entities/NotasCorte";
 import { Usuario } from "../Entities/Usuario";
@@ -56,7 +57,8 @@ export const AppDataSource = new DataSource({
     // prod/homologação só polui os logs (e pode vazar dados de query).
     logging: APP_ENV === "local",
     entities: [NotasCorte, Usuario, UsuarioConfig, Favorito, Notificacao, ImportacaoNotas],
-    migrations: [],
+    migrations: [path.join(__dirname, "migrations", "*.{ts,js}")],
+    migrationsTableName: "typeorm_migrations",
     subscribers: [],
     extra: {
         // Bancos gerenciados (prod e dev) exigem SSL; só o Postgres local

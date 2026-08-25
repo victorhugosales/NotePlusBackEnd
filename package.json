@@ -8,7 +8,10 @@
         "build": "tsc",
         "start": "node dist/server.js",
         "dev": "ts-node-dev --transpile-only src/server.ts",
-        "typeorm": "ts-node-dev ./node_modules/typeorm/cli.js",
+        "typeorm": "ts-node-dev --transpile-only ./node_modules/typeorm/cli.js",
+        "migration:run": "npm run typeorm -- -d src/database/datasource.ts migration:run",
+        "migration:revert": "npm run typeorm -- -d src/database/datasource.ts migration:revert",
+        "migration:create": "npm run typeorm -- migration:create",
         "import:notas": "ts-node --transpile-only src/scripts/importarNotasCorte.ts",
         "test": "echo \"Error: no test specified\" && exit 1"
     },

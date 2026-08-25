@@ -111,6 +111,18 @@ export class ImportacaoController {
       }
 
       await AppDataSource.transaction(async (manager) => {
+        // NotasDeCortes é particionada por EDICAO (ver migration
+        // ParticionarNotasDeCortes) — uma edição nova do SISU precisa da
+        // partição criada antes do primeiro INSERT. `ano` já passou por
+        // validarAno() acima (inteiro garantido), por isso é seguro
+        // interpolar direto no nome da partição/valor. O valor vai entre
+        // aspas simples porque EDICAO é varchar em alguns ambientes (ex.:
+        // local) — como literal de texto, funciona igual em colunas
+        // integer (o Postgres converte sozinho) ou varchar.
+        await manager.query(
+          `CREATE TABLE IF NOT EXISTS "NotasDeCortes_${ano}" PARTITION OF "NotasDeCortes" FOR VALUES IN ('${ano}')`
+        );
+
         if (totalExistente > 0 && substituir) {
           await manager.query(`DELETE FROM "NotasDeCortes" WHERE "EDICAO" = $1`, [ano]);
         }
