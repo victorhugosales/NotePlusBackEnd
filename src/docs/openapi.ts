@@ -128,7 +128,7 @@ export const openApiSpec = {
                 tags: ["Notas de Corte"],
                 summary: "Busca notas de corte (Home, Cursos, Faculdades ou Detalhes, conforme os parâmetros enviados)",
                 description:
-                    "Endpoint único com 4 comportamentos: `codigo` presente → detalhes de um curso específico; `global=true`+`curso` → busca geral (Home); `curso` sozinho → busca por curso (aba Cursos); `universidade` sozinho → busca por instituição (aba Faculdades).",
+                    "Endpoint único com 5 comportamentos: `codigo` presente → detalhes de um curso específico; `global=true`+`curso` → busca geral (Home); `curso` sozinho → busca por curso (aba Cursos); `universidade` sozinho → busca por instituição (aba Faculdades ou filtro de Instituições da Home); `cidade` sozinho → busca por município (filtro de Municípios da Home). Os valores de `uf`/`cidade`/`universidade`/`curso` usados pelos filtros em cascata da Home vêm de /estados-disponiveis, /municipios-disponiveis, /instituicoes-disponiveis e /cursos-disponiveis.",
                 parameters: [
                     { name: "curso", in: "query", schema: { type: "string" }, description: "Nome (parcial) do curso" },
                     { name: "universidade", in: "query", schema: { type: "string" }, description: "Sigla ou nome (parcial) da universidade" },
@@ -199,6 +199,89 @@ export const openApiSpec = {
                     200: {
                         description: "Lista de anos",
                         content: { "application/json": { schema: { type: "array", items: { type: "integer" }, example: [2026, 2025, 2024] } } },
+                    },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/estados-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "UFs com dados cadastrados",
+                description: "1ª etapa dos filtros em cascata \"Municípios\" e \"Instituições\" da Home. Lista completa (sem limite), diferente de /sugestoes.",
+                parameters: [
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026, description: "Restringe às UFs com dados naquela edição do SISU" },
+                ],
+                responses: {
+                    200: {
+                        description: "Siglas de UF ordenadas alfabeticamente",
+                        content: { "application/json": { schema: { type: "array", items: { type: "string" }, example: ["CE", "GO", "SP"] } } },
+                    },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/municipios-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Municípios com dados cadastrados numa UF",
+                description: "2ª etapa do filtro \"Municípios\" da Home, depois de escolher a UF em /estados-disponiveis.",
+                parameters: [
+                    { name: "uf", in: "query", required: true, schema: { type: "string" }, example: "CE" },
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
+                ],
+                responses: {
+                    200: {
+                        description: "Nomes de município ordenados alfabeticamente",
+                        content: { "application/json": { schema: { type: "array", items: { type: "string" }, example: ["Fortaleza", "Sobral"] } } },
+                    },
+                    400: { description: "Parâmetro uf não informado", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/instituicoes-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Instituições com dados cadastrados numa UF",
+                description: "2ª etapa do filtro \"Instituições\" da Home, depois de escolher a UF em /estados-disponiveis.",
+                parameters: [
+                    { name: "uf", in: "query", required: true, schema: { type: "string" }, example: "CE" },
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
+                ],
+                responses: {
+                    200: {
+                        description: "Instituições ordenadas por nome",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "array",
+                                    items: {
+                                        type: "object",
+                                        properties: { nome: { type: "string" }, sigla: { type: "string" } },
+                                    },
+                                    example: [{ nome: "UNIVERSIDADE FEDERAL DO CEARÁ", sigla: "UFC" }],
+                                },
+                            },
+                        },
+                    },
+                    400: { description: "Parâmetro uf não informado", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/cursos-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Todos os cursos distintos cadastrados",
+                description: "Filtro \"Cursos\" da Home — lista flat (sem cascata de UF), diferente de /sugestoes (que exige termo de busca).",
+                parameters: [
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
+                ],
+                responses: {
+                    200: {
+                        description: "Nomes de curso ordenados alfabeticamente",
+                        content: { "application/json": { schema: { type: "array", items: { type: "string" } } } },
                     },
                     429: { $ref: "#/components/responses/MuitasRequisicoes" },
                 },
