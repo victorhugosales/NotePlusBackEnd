@@ -128,7 +128,7 @@ export const openApiSpec = {
                 tags: ["Notas de Corte"],
                 summary: "Busca notas de corte (Home, Cursos, Faculdades ou Detalhes, conforme os parâmetros enviados)",
                 description:
-                    "Endpoint único com 5 comportamentos: `codigo` presente → detalhes de um curso específico; `global=true`+`curso` → busca geral (Home); `curso` sozinho → busca por curso (aba Cursos); `universidade` sozinho → busca por instituição (aba Faculdades ou filtro de Instituições da Home); `cidade` sozinho → busca por município (filtro de Municípios da Home). Os valores de `uf`/`cidade`/`universidade`/`curso` usados pelos filtros em cascata da Home vêm de /estados-disponiveis, /municipios-disponiveis, /instituicoes-disponiveis e /cursos-disponiveis.",
+                    "Endpoint único com 5 comportamentos: `codigo` presente → detalhes de um curso específico; `global=true`+`curso` → busca geral (Home); `curso` sozinho → busca por curso (aba Cursos); `universidade` sozinho → busca por instituição (aba Faculdades ou filtro de Instituições da Home); `cidade` sozinho → busca por município (filtro de Municípios da Home). Os valores de `uf`/`cidade`/`universidade`/`curso` usados pelos filtros em cascata da Home vêm de /estados-disponiveis, /municipios-disponiveis, /instituicoes-disponiveis e /cursos-disponiveis; `turno`/`grau` (filtros da aba Cursos) vêm de /turnos-disponiveis e /graus-disponiveis; `categoria` (filtro da aba Faculdades) vem de /categorias-disponiveis.",
                 parameters: [
                     { name: "curso", in: "query", schema: { type: "string" }, description: "Nome (parcial) do curso" },
                     { name: "universidade", in: "query", schema: { type: "string" }, description: "Sigla ou nome (parcial) da universidade" },
@@ -136,7 +136,10 @@ export const openApiSpec = {
                     { name: "global", in: "query", schema: { type: "boolean" }, description: "true = busca geral (Home)" },
                     { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
                     { name: "uf", in: "query", schema: { type: "string" }, example: "CE" },
-                    { name: "turno", in: "query", schema: { type: "string" }, description: "Só usado junto com `codigo`" },
+                    { name: "turno", in: "query", schema: { type: "string" }, description: "Com `codigo`: filtra a página de Detalhes. Com `curso` (aba Cursos): filtro exato de turno, valor vindo de /turnos-disponiveis." },
+                    { name: "grau", in: "query", schema: { type: "string" }, description: "Só usado junto com `curso` (aba Cursos) — filtro exato de grau, valor vindo de /graus-disponiveis." },
+                    { name: "categoria", in: "query", schema: { type: "string" }, description: "Só usado junto com `universidade` (aba Faculdades) — filtro exato de categoria administrativa (Federal/Estadual/Municipal), valor vindo de /categorias-disponiveis." },
+                    { name: "exato", in: "query", schema: { type: "boolean" }, description: "Só usado junto com `universidade` (aba Faculdades). true = `universidade` é comparado por igualdade (sigla ou nome exatos, escolhidos no autocomplete) em vez de ILIKE parcial — evita que \"UFC\" traga também UFCA/UFCAT/UFCG/UFCSPA." },
                     { name: "cidade", in: "query", schema: { type: "string" } },
                 ],
                 responses: {
@@ -282,6 +285,57 @@ export const openApiSpec = {
                     200: {
                         description: "Nomes de curso ordenados alfabeticamente",
                         content: { "application/json": { schema: { type: "array", items: { type: "string" } } } },
+                    },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/turnos-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Turnos distintos cadastrados",
+                description: "Filtro \"Turno\" da aba Cursos — lista flat, mesmo padrão de /cursos-disponiveis.",
+                parameters: [
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
+                ],
+                responses: {
+                    200: {
+                        description: "Turnos ordenados alfabeticamente",
+                        content: { "application/json": { schema: { type: "array", items: { type: "string" }, example: ["Integral", "Matutino", "Noturno", "Vespertino"] } } },
+                    },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/graus-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Graus distintos cadastrados",
+                description: "Filtro \"Grau\" da aba Cursos — lista flat, mesmo padrão de /cursos-disponiveis.",
+                parameters: [
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
+                ],
+                responses: {
+                    200: {
+                        description: "Graus ordenados alfabeticamente",
+                        content: { "application/json": { schema: { type: "array", items: { type: "string" }, example: ["Bacharelado", "Licenciatura", "Tecnólogo"] } } },
+                    },
+                    429: { $ref: "#/components/responses/MuitasRequisicoes" },
+                },
+            },
+        },
+        "/categorias-disponiveis": {
+            get: {
+                tags: ["Notas de Corte"],
+                summary: "Categorias administrativas distintas cadastradas",
+                description: "Filtro \"Categoria\" da aba Faculdades (Federal/Estadual/Municipal) — lista flat, mesmo padrão de /cursos-disponiveis.",
+                parameters: [
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026 },
+                ],
+                responses: {
+                    200: {
+                        description: "Categorias ordenadas alfabeticamente",
+                        content: { "application/json": { schema: { type: "array", items: { type: "string" }, example: ["Estadual", "Federal", "Municipal"] } } },
                     },
                     429: { $ref: "#/components/responses/MuitasRequisicoes" },
                 },

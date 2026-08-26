@@ -53,6 +53,10 @@ export class NotasCorte {
   @Column ({name: 'DS_GRAU'})
   grau!: string;
 
+  // Federal/Estadual/Municipal — filtro "Categoria" da página de Faculdades.
+  @Column({ name: 'DS_CATEGORIA_ADM', nullable: true })
+  categoria_administrativa?: string;
+
   @Column({
     type: "decimal",
     name: 'NU_NOTACORTE',

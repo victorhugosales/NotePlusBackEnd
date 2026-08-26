@@ -60,3 +60,21 @@ export const cursosCache = new LRUCache<string, any>({
   max: 20,
   ttl: 1000 * 60 * 30,
 });
+
+// Filtros de Turno e Grau da página de Cursos. Mesmo racional do
+// cursosCache: poucos valores distintos, um por edição do SISU.
+export const turnosCache = new LRUCache<string, any>({
+  max: 20,
+  ttl: 1000 * 60 * 30,
+});
+export const grausCache = new LRUCache<string, any>({
+  max: 20,
+  ttl: 1000 * 60 * 30,
+});
+
+// Filtro de Categoria Administrativa (Federal/Estadual/Municipal) da
+// página de Faculdades. Mesmo racional do turnosCache/grausCache.
+export const categoriasCache = new LRUCache<string, any>({
+  max: 20,
+  ttl: 1000 * 60 * 30,
+});

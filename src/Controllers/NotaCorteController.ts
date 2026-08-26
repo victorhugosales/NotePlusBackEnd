@@ -4,7 +4,7 @@ import { NotasCorte } from "../Entities/NotasCorte";
 import { Like, ILike, Raw } from "typeorm";
 import {
   pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY, anosCache, ANOS_CACHE_KEY,
-  estadosCache, municipiosCache, instituicoesCache, cursosCache,
+  estadosCache, municipiosCache, instituicoesCache, cursosCache, turnosCache, grausCache, categoriasCache,
 } from "../cache/searchCache";
 
 // A coluna QT_VAGAS_OFERTADAS não tem o mesmo tipo em todos os ambientes
@@ -24,7 +24,7 @@ const SUM_VAGAS = `SUM(NULLIF(nota."QT_VAGAS_OFERTADAS"::text, '')::numeric)`;
 
 export class NotasCorteController {
   async search(req: Request, res: Response) {
-    const { curso, universidade, cidade, ano, global, codigo, uf, turno } = req.query;
+    const { curso, universidade, cidade, ano, global, codigo, uf, turno, grau, categoria, exato } = req.query;
     const filtros: any = {};
     const isDetalhes = curso && universidade && global !== 'true';
     const colunasLista: any = {
@@ -153,6 +153,15 @@ export class NotasCorteController {
         if (ano) {
           query.andWhere("nota.ano = :ano", { ano: String(ano) });
         }
+        // Filtros de Turno e Grau da página de Cursos — igualdade exata: os
+        // valores vêm de /turnos-disponiveis e /graus-disponiveis, não são
+        // digitados pelo usuário.
+        if (turno) {
+          query.andWhere("nota.turno = :turno", { turno: String(turno) });
+        }
+        if (grau) {
+          query.andWhere("nota.grau = :grau", { grau: String(grau) });
+        }
 
         const resultados = await query
           .groupBy("nota.curso")
@@ -172,6 +181,13 @@ export class NotasCorteController {
       // Página de Instituições (apenas universidade)
       else if (universidade) {
 
+        // Selecionou uma sugestão do autocomplete (sigla ou nome exatos, já
+        // confirmados por /sugestoes) em vez de digitar livre: troca ILIKE
+        // por igualdade exata. Sem isso, "UFC" batia em ILIKE '%UFC%' e
+        // trazia junto UFCA, UFCAT, UFCG, UFCSPA — resultado maior que o
+        // necessário pra quem já escolheu a instituição certa na lista.
+        const buscaExata = exato === "true";
+
         const resultadosQuery = repo
           .createQueryBuilder("nota")
           .select([
@@ -183,14 +199,20 @@ export class NotasCorteController {
             "nota.campus AS campus",
             "nota.grau AS grau",
             "nota.turno AS turno",
+            "nota.categoria_administrativa AS categoria_administrativa",
             `${SUM_VAGAS} AS vagas`
           ])
           .where(
-            `(
+            buscaExata
+              ? `(
+        nota.sigla_universidade = :universidade
+        OR nota.nome_universidade = :universidade
+        )`
+              : `(
         nota.sigla_universidade ILIKE :universidade
         OR nota.nome_universidade ILIKE :universidade
         )`,
-            { universidade: `%${universidade}%` }
+            { universidade: buscaExata ? String(universidade) : `%${universidade}%` }
           );
 
         // Precisa dos parênteses acima: sem eles, "A OR B AND ano" vira
@@ -202,6 +224,13 @@ export class NotasCorteController {
         if (ano) {
           resultadosQuery.andWhere("nota.ano = :ano", { ano: String(ano) });
         }
+        // Filtros "Estado" e "Categoria" da página de Faculdades.
+        if (uf) {
+          resultadosQuery.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+        }
+        if (categoria) {
+          resultadosQuery.andWhere("nota.categoria_administrativa = :categoria", { categoria: String(categoria) });
+        }
 
         const resultados = await resultadosQuery
           .groupBy("nota.curso")
@@ -212,6 +241,7 @@ export class NotasCorteController {
           .addGroupBy("nota.campus")
           .addGroupBy("nota.grau")
           .addGroupBy("nota.turno")
+          .addGroupBy("nota.categoria_administrativa")
           .orderBy("nota.curso", "ASC")
           .limit(200)
           .getRawMany();
@@ -441,6 +471,91 @@ export class NotasCorteController {
     } catch (error) {
       console.error("Erro no Banco:", error);
       return res.status(500).json({ error: "Erro ao buscar cursos disponíveis" });
+    }
+  }
+
+  // Turnos e graus distintos — filtros da página de Cursos. Mesmo padrão de
+  // /cursos-disponiveis: sem termo de busca, lista completa cacheada.
+  async turnosDisponiveis(req: Request, res: Response) {
+    const { ano } = req.query;
+    const cacheKey = `turnos:${ano || "todos"}`;
+    const cached = turnosCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.turno", "turno");
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.turno", "ASC").getRawMany();
+      const turnos = linhas.map((l) => l.turno).filter(Boolean);
+
+      turnosCache.set(cacheKey, turnos);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(turnos);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar turnos disponíveis" });
+    }
+  }
+
+  async grausDisponiveis(req: Request, res: Response) {
+    const { ano } = req.query;
+    const cacheKey = `graus:${ano || "todos"}`;
+    const cached = grausCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.grau", "grau");
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.grau", "ASC").getRawMany();
+      const graus = linhas.map((l) => l.grau).filter(Boolean);
+
+      grausCache.set(cacheKey, graus);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(graus);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar graus disponíveis" });
+    }
+  }
+
+  // Categoria administrativa distinta — filtro "Categoria" da página de
+  // Faculdades. Mesmo padrão de /turnos-disponiveis e /graus-disponiveis.
+  async categoriasDisponiveis(req: Request, res: Response) {
+    const { ano } = req.query;
+    const cacheKey = `categorias:${ano || "todos"}`;
+    const cached = categoriasCache.get(cacheKey);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cached);
+    }
+
+    try {
+      const query = AppDataSource.getRepository(NotasCorte)
+        .createQueryBuilder("nota")
+        .select("DISTINCT nota.categoria_administrativa", "categoria");
+      if (ano) query.andWhere("nota.ano = :ano", { ano: String(ano) });
+
+      const linhas = await query.orderBy("nota.categoria_administrativa", "ASC").getRawMany();
+      const categorias = linhas.map((l) => l.categoria).filter(Boolean);
+
+      categoriasCache.set(cacheKey, categorias);
+      res.setHeader("X-Cache", "MISS");
+      return res.json(categorias);
+    } catch (error) {
+      console.error("Erro no Banco:", error);
+      return res.status(500).json({ error: "Erro ao buscar categorias disponíveis" });
     }
   }
 

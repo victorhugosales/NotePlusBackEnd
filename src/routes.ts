@@ -39,6 +39,9 @@ routes.get("/estados-disponiveis", limiterBusca, controller.estadosDisponiveis);
 routes.get("/municipios-disponiveis", limiterBusca, controller.municipiosDisponiveis);
 routes.get("/instituicoes-disponiveis", limiterBusca, controller.instituicoesDisponiveis);
 routes.get("/cursos-disponiveis", limiterBusca, controller.cursosDisponiveis);
+routes.get("/turnos-disponiveis", limiterBusca, controller.turnosDisponiveis);
+routes.get("/graus-disponiveis", limiterBusca, controller.grausDisponiveis);
+routes.get("/categorias-disponiveis", limiterBusca, controller.categoriasDisponiveis);
 
 // Autenticação — limites mais apertados: /login contra força bruta de
 // senha, /usuarios contra criação automatizada de contas.
