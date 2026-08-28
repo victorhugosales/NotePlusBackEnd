@@ -176,6 +176,9 @@ export const openApiSpec = {
             get: {
                 tags: ["Notas de Corte"],
                 summary: "Estatísticas gerais para o dashboard da Home",
+                parameters: [
+                    { name: "ano", in: "query", schema: { type: "integer" }, example: 2026, description: "Restringe as contagens a uma edição do SISU. Sem esse parâmetro, soma todas as edições (comportamento antigo)." },
+                ],
                 responses: {
                     200: {
                         description: "Contagens agregadas",

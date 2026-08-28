@@ -214,7 +214,11 @@ export class UsuarioController {
     }
 
     async getDashboardStats(req: AuthRequest, res: Response) {
-        const cached = statsCache.get(STATS_CACHE_KEY);
+        const { ano } = req.query;
+        // Cache por edição: sem `ano`, mantém o comportamento antigo (todas
+        // as edições somadas) — mas a Home sempre manda o ano atual agora.
+        const cacheKey = ano ? `${STATS_CACHE_KEY}:${ano}` : STATS_CACHE_KEY;
+        const cached = statsCache.get(cacheKey);
         if (cached) {
             res.setHeader("X-Cache", "HIT");
             return res.json(cached);
@@ -223,12 +227,15 @@ export class UsuarioController {
         const repo = AppDataSource.getRepository(NotasCorte);
 
         try {
-            const stats = await repo
+            const query = repo
                 .createQueryBuilder("nota")
                 .select("COUNT(DISTINCT nota.curso)", "totalCursos")
                 .addSelect("COUNT(DISTINCT nota.codigo_instituicao)", "totalFaculdades")
-                .addSelect("COUNT(DISTINCT nota.uf_campus)", "totalEstados")
-                .getRawOne();
+                .addSelect("COUNT(DISTINCT nota.uf_campus)", "totalEstados");
+
+            if (ano) query.where("nota.ano = :ano", { ano: Number(ano) });
+
+            const stats = await query.getRawOne();
 
             const totalCursos = parseInt(stats.totalCursos);
             const totalFaculdades = parseInt(stats.totalFaculdades);
@@ -243,7 +250,7 @@ export class UsuarioController {
                 totalEstados,
                 mediaCursos
             };
-            statsCache.set(STATS_CACHE_KEY, resultado);
+            statsCache.set(cacheKey, resultado);
             res.setHeader("X-Cache", "MISS");
             return res.json(resultado);
         } catch (error) {
