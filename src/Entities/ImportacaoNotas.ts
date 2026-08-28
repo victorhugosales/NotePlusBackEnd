@@ -30,6 +30,15 @@ export class ImportacaoNotas {
   @Column()
   modo!: string;
 
+  // Importação roda em background (ver ImportacaoController.confirmar) —
+  // 'processando' até os inserts em lote terminarem, depois 'concluido' ou
+  // 'erro'. GET /admin/importacoes/:id faz polling nisso.
+  @Column({ default: "concluido" })
+  status!: string;
+
+  @Column({ nullable: true })
+  mensagem_erro?: string;
+
   @CreateDateColumn()
   created_at!: Date;
 }

@@ -81,10 +81,15 @@ export class ImportacaoController {
   }
 
   // Passo 2: reprocessa o mesmo arquivo (o admin reenvia — nada fica
-  // guardado no servidor entre os dois passos) e grava de fato, dentro de
-  // uma transação. `substituir=true` apaga os dados existentes do ano antes
-  // de inserir os novos; sem isso, a rota recusa se o ano já tiver dados
-  // (mesma trava do script de terminal).
+  // guardado no servidor entre os dois passos). Parse + validação (rápido,
+  // só CPU) roda aqui e já dá pra saber totalLinhas/válidas/erros antes de
+  // responder; os inserts em lote (a parte lenta, uma planilha grande passa
+  // de 50 mil linhas) rodam em background depois da resposta — sem isso, a
+  // requisição HTTP ficava presa tempo suficiente pra estourar o timeout do
+  // proxy em homologação/produção (502, mesmo com a importação ainda
+  // rodando no servidor). `substituir=true` apaga os dados existentes do
+  // ano antes de inserir os novos; sem isso, a rota recusa se o ano já
+  // tiver dados (mesma trava do script de terminal).
   async confirmar(req: RequestComArquivo, res: Response) {
     if (!req.file) return res.status(400).json({ error: "Envie um arquivo de planilha (.xlsx)" });
     if (!req.userId) return res.status(401).json({ error: "Não autenticado" });
@@ -110,29 +115,8 @@ export class ImportacaoController {
         });
       }
 
-      await AppDataSource.transaction(async (manager) => {
-        // NotasDeCortes é particionada por EDICAO (ver migration
-        // ParticionarNotasDeCortes) — uma edição nova do SISU precisa da
-        // partição criada antes do primeiro INSERT. `ano` já passou por
-        // validarAno() acima (inteiro garantido), por isso é seguro
-        // interpolar direto no nome da partição/valor. O valor vai entre
-        // aspas simples porque EDICAO é varchar em alguns ambientes (ex.:
-        // local) — como literal de texto, funciona igual em colunas
-        // integer (o Postgres converte sozinho) ou varchar.
-        await manager.query(
-          `CREATE TABLE IF NOT EXISTS "NotasDeCortes_${ano}" PARTITION OF "NotasDeCortes" FOR VALUES IN ('${ano}')`
-        );
-
-        if (totalExistente > 0 && substituir) {
-          await manager.query(`DELETE FROM "NotasDeCortes" WHERE "EDICAO" = $1`, [ano]);
-        }
-        for (let i = 0; i < validas.length; i += TAMANHO_LOTE) {
-          await inserirLote(validas.slice(i, i + TAMANHO_LOTE));
-        }
-      });
-
       const importacaoRepo = AppDataSource.getRepository(ImportacaoNotas);
-      await importacaoRepo.save(
+      const registro = await importacaoRepo.save(
         importacaoRepo.create({
           usuario_id: req.userId,
           ano,
@@ -141,26 +125,81 @@ export class ImportacaoController {
           linhas_importadas: validas.length,
           linhas_com_erro: comErro.length,
           modo: totalExistente > 0 ? "substituiu" : "adicionou",
+          status: "processando",
         })
       );
 
-      // Dashboard e seletores de ano dependem desses dados — sem isso, o
-      // ano recém-importado só apareceria depois dos 30 minutos de TTL.
-      statsCache.delete(STATS_CACHE_KEY);
-      anosCache.delete(ANOS_CACHE_KEY);
-
-      return res.json({
-        message: `${validas.length} linhas importadas para o ano ${ano}.`,
+      // Responde já — o front passa a fazer polling em GET
+      // /admin/importacoes/:id até o status sair de "processando".
+      res.status(202).json({
+        id: registro.id,
+        status: "processando",
+        message: `Importando ${validas.length} linhas para o ano ${ano}...`,
         totalLinhas,
         totalImportadas: validas.length,
         totalComErro: comErro.length,
       });
+
+      // Fire-and-forget: intencionalmente sem `await` no handler. Erros são
+      // pegos e gravados no próprio registro (não tem mais response pra
+      // devolver 500) — sem o catch aqui, uma rejeição não tratada nessa
+      // promise derrubaria o processo Node inteiro.
+      (async () => {
+        try {
+          await AppDataSource.transaction(async (manager) => {
+            // NotasDeCortes é particionada por EDICAO (ver migration
+            // ParticionarNotasDeCortes) — uma edição nova do SISU precisa da
+            // partição criada antes do primeiro INSERT. `ano` já passou por
+            // validarAno() acima (inteiro garantido), por isso é seguro
+            // interpolar direto no nome da partição/valor. O valor vai entre
+            // aspas simples porque EDICAO é varchar em alguns ambientes (ex.:
+            // local) — como literal de texto, funciona igual em colunas
+            // integer (o Postgres converte sozinho) ou varchar.
+            await manager.query(
+              `CREATE TABLE IF NOT EXISTS "NotasDeCortes_${ano}" PARTITION OF "NotasDeCortes" FOR VALUES IN ('${ano}')`
+            );
+
+            if (totalExistente > 0 && substituir) {
+              await manager.query(`DELETE FROM "NotasDeCortes" WHERE "EDICAO" = $1`, [ano]);
+            }
+            for (let i = 0; i < validas.length; i += TAMANHO_LOTE) {
+              await inserirLote(validas.slice(i, i + TAMANHO_LOTE));
+            }
+          });
+
+          // Dashboard e seletores de ano dependem desses dados — sem isso, o
+          // ano recém-importado só apareceria depois dos 30 minutos de TTL.
+          statsCache.delete(STATS_CACHE_KEY);
+          anosCache.delete(ANOS_CACHE_KEY);
+
+          await importacaoRepo.update(registro.id, { status: "concluido" });
+        } catch (error) {
+          console.error("Erro ao importar planilha (background):", error);
+          const mensagem = error instanceof Error ? error.message : "Erro desconhecido";
+          await importacaoRepo.update(registro.id, { status: "erro", mensagem_erro: mensagem });
+        }
+      })();
     } catch (error) {
       if (error instanceof PlanilhaInvalidaError) {
         return res.status(400).json({ error: error.message });
       }
       console.error(error);
       return res.status(500).json({ error: "Erro ao importar a planilha" });
+    }
+  }
+
+  // Polling do andamento de uma importação em background (ver `confirmar`).
+  async status(req: RequestComArquivo, res: Response) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "id inválido" });
+
+    try {
+      const registro = await AppDataSource.getRepository(ImportacaoNotas).findOneBy({ id });
+      if (!registro) return res.status(404).json({ error: "Importação não encontrada" });
+      return res.json(registro);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar status da importação" });
     }
   }
 

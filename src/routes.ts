@@ -76,5 +76,6 @@ routes.post(
   importacaoController.confirmar
 );
 routes.get("/admin/importacoes", authMiddleware, adminMiddleware, importacaoController.listarHistorico);
+routes.get("/admin/importacoes/:id", authMiddleware, adminMiddleware, importacaoController.status);
 
 export default routes;

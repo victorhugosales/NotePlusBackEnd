@@ -770,9 +770,9 @@ export const openApiSpec = {
         "/admin/importacoes/confirmar": {
             post: {
                 tags: ["Admin"],
-                summary: "Confirma a importação da planilha (grava no banco, dentro de uma transação)",
+                summary: "Confirma a importação da planilha (grava no banco em background)",
                 description:
-                    "Reprocessa o mesmo arquivo enviado em /analisar (nada fica guardado no servidor entre os dois passos) e grava as linhas válidas. Se já existir dado pro ano e `substituir` não for true, recusa com 409.",
+                    "Reprocessa o mesmo arquivo enviado em /analisar (nada fica guardado no servidor entre os dois passos), valida na hora (rápido, só CPU) e responde 202 assim que cria o registro — os inserts em lote (a parte lenta, planilhas grandes passam de 50 mil linhas) rodam em background depois da resposta, pra não estourar timeout de proxy em homologação/produção. Acompanhe o andamento com GET /admin/importacoes/{id} (status `processando` → `concluido`/`erro`). Se já existir dado pro ano e `substituir` não for true, recusa com 409 (sem criar registro nem rodar nada).",
                 security: [{ bearerAuth: [] }],
                 requestBody: {
                     required: true,
@@ -791,7 +791,7 @@ export const openApiSpec = {
                     },
                 },
                 responses: {
-                    200: { description: "Importação concluída" },
+                    202: { description: "Importação iniciada — inserts rodando em background, consulte GET /admin/importacoes/{id} pro andamento" },
                     400: { description: "Arquivo/ano ausente ou planilha com estrutura inválida", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
                     401: { $ref: "#/components/responses/NaoAutorizado" },
                     403: { description: "Usuário autenticado não é admin" },
@@ -803,12 +803,50 @@ export const openApiSpec = {
         "/admin/importacoes": {
             get: {
                 tags: ["Admin"],
-                summary: "Histórico das últimas 50 importações confirmadas",
+                summary: "Histórico das últimas 50 importações (qualquer status)",
                 security: [{ bearerAuth: [] }],
                 responses: {
                     200: { description: "Lista de importações" },
                     401: { $ref: "#/components/responses/NaoAutorizado" },
                     403: { description: "Usuário autenticado não é admin" },
+                },
+            },
+        },
+        "/admin/importacoes/{id}": {
+            get: {
+                tags: ["Admin"],
+                summary: "Status de uma importação (polling)",
+                description: "Usado pelo front pra acompanhar uma importação disparada por POST /admin/importacoes/confirmar até o status sair de `processando`.",
+                security: [{ bearerAuth: [] }],
+                parameters: [
+                    { name: "id", in: "path", required: true, schema: { type: "integer" } },
+                ],
+                responses: {
+                    200: {
+                        description: "Registro da importação",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        id: { type: "integer" },
+                                        ano: { type: "integer" },
+                                        nome_arquivo: { type: "string" },
+                                        total_linhas: { type: "integer" },
+                                        linhas_importadas: { type: "integer" },
+                                        linhas_com_erro: { type: "integer" },
+                                        modo: { type: "string", example: "adicionou" },
+                                        status: { type: "string", enum: ["processando", "concluido", "erro"] },
+                                        mensagem_erro: { type: "string", nullable: true },
+                                        created_at: { type: "string", format: "date-time" },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    401: { $ref: "#/components/responses/NaoAutorizado" },
+                    403: { description: "Usuário autenticado não é admin" },
+                    404: { description: "Importação não encontrada", content: { "application/json": { schema: { $ref: "#/components/schemas/Erro" } } } },
                 },
             },
         },
