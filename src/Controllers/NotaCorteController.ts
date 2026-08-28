@@ -1,7 +1,8 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../database/datasource";
 import { NotasCorte } from "../Entities/NotasCorte";
-import { Like, ILike, Raw } from "typeorm";
+import { Favorito } from "../Entities/Favorito";
+import { Like, ILike, Raw, Brackets } from "typeorm";
 import {
   pesquisaCache, sugestoesCache, statsCache, STATS_CACHE_KEY, anosCache, ANOS_CACHE_KEY,
   estadosCache, municipiosCache, instituicoesCache, cursosCache, turnosCache, grausCache, categoriasCache,
@@ -20,11 +21,28 @@ import {
 // "nota.vagas" cru pro Postgres, que não existe (o nome físico da coluna é
 // outro). Referenciando a coluna física direto, isso não depende dessa
 // tradução.
-const SUM_VAGAS = `SUM(NULLIF(nota."QT_VAGAS_OFERTADAS"::text, '')::numeric)`;
+const VAGAS_NUMERICAS = `NULLIF(nota."QT_VAGAS_OFERTADAS"::text, '')::numeric`;
+const SUM_VAGAS = `SUM(${VAGAS_NUMERICAS})`;
+
+// Mesmo problema, mesma solução: NU_NOTACORTE também não é numeric em todo
+// ambiente (varchar em alguns), e comparar/ordenar direto (`nota_corte > 0`)
+// quebra com "operator does not exist: character varying > integer". Troca
+// vírgula por ponto antes do cast — o transformer da entity já faz isso no
+// lado do JS (repo.find), mas aqui é SQL cru (getRawMany), então precisa
+// replicar. Usada tanto pra comparar/ordenar quanto pro valor que volta pro
+// front (sem isso "938,25" vira NaN em Number() lá).
+const NOTA_CORTE_NUMERICA = `NULLIF(REPLACE(nota."NU_NOTACORTE"::text, ',', '.'), '')::numeric`;
+
+// Modalidade usada pelos cards de "destaque" da Home (Maiores/Menores
+// Notas, Mais Ofertados, Mais Procurados): é a única modalidade que existe
+// pra praticamente todo curso/campus, então é a única em que comparar nota
+// de corte entre ofertas diferentes faz sentido — as demais são cotas com
+// critérios próprios (renda, PCD, etc.), não comparáveis entre si.
+const MODALIDADE_AMPLA_CONCORRENCIA = "AC";
 
 export class NotasCorteController {
   async search(req: Request, res: Response) {
-    const { curso, universidade, cidade, ano, global, codigo, uf, turno, grau, categoria, exato } = req.query;
+    const { curso, universidade, cidade, ano, global, codigo, uf, turno, grau, categoria, exato, destaque } = req.query;
     const filtros: any = {};
     const isDetalhes = curso && universidade && global !== 'true';
     const colunasLista: any = {
@@ -71,6 +89,97 @@ export class NotasCorteController {
           ...filtros,
           codigo_curso: Number(codigo)
         };
+      }
+
+      // Cards de "Destaque" da Home (Mais Procurados / Maiores Notas /
+      // Mais Ofertados / Mais Possibilidades) — sem termo de busca, só
+      // listas prontas a partir de um critério de ordenação.
+      else if (destaque) {
+        const colunasDestaque = [
+          "nota.curso AS curso",
+          "nota.codigo_curso AS codigo_curso",
+          "nota.sigla_universidade AS sigla_universidade",
+          "nota.nome_universidade AS nome_universidade",
+          "nota.uf_campus AS uf_campus",
+          "nota.cidade AS cidade",
+          "nota.campus AS campus",
+          "nota.grau AS grau",
+          "nota.turno AS turno",
+          `${NOTA_CORTE_NUMERICA} AS nota_corte`,
+          `${VAGAS_NUMERICAS} AS vagas`
+        ];
+
+        // "Mais Procurados": não existe rastreio de quantas vezes um curso
+        // foi pesquisado, então usamos o único sinal de popularidade que já
+        // existe no banco — quantos usuários favoritaram cada curso.
+        if (destaque === 'mais-procurados') {
+          const ranking = await AppDataSource.getRepository(Favorito)
+            .createQueryBuilder("fav")
+            .select(["fav.codigo_curso AS codigo_curso", "fav.sigla_universidade AS sigla_universidade", "COUNT(*) AS total"])
+            .groupBy("fav.codigo_curso")
+            .addGroupBy("fav.sigla_universidade")
+            .orderBy("total", "DESC")
+            .limit(30)
+            .getRawMany();
+
+          if (ranking.length === 0) return respond([]);
+
+          const query = repo
+            .createQueryBuilder("nota")
+            .select(colunasDestaque)
+            .where("nota.modalidade = :modalidade", { modalidade: MODALIDADE_AMPLA_CONCORRENCIA })
+            .andWhere(new Brackets((qb) => {
+              ranking.forEach((item, i) => {
+                const condicao = `(nota.codigo_curso = :cod${i} AND nota.sigla_universidade = :uni${i})`;
+                const parametros = { [`cod${i}`]: item.codigo_curso, [`uni${i}`]: item.sigla_universidade };
+                if (i === 0) qb.where(condicao, parametros);
+                else qb.orWhere(condicao, parametros);
+              });
+            }));
+
+          if (ano) query.andWhere("nota.ano = :ano", { ano: Number(ano) });
+          if (uf) query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+
+          const linhas: any[] = await query.getRawMany();
+
+          // A query acima não preserva a ordem do ranking de favoritos —
+          // reordena pelo mesmo critério antes de responder.
+          const posicao = new Map(ranking.map((item, i) => [`${item.codigo_curso}-${item.sigla_universidade}`, i]));
+          linhas.sort((a, b) =>
+            (posicao.get(`${a.codigo_curso}-${a.sigla_universidade}`) ?? 0) -
+            (posicao.get(`${b.codigo_curso}-${b.sigla_universidade}`) ?? 0)
+          );
+
+          return respond(linhas);
+        }
+
+        const ordenacoes: Record<string, { coluna: string; direcao: "ASC" | "DESC" }> = {
+          'maiores-notas': { coluna: "nota_corte", direcao: "DESC" },
+          'menores-notas': { coluna: "nota_corte", direcao: "ASC" },
+          'mais-ofertados': { coluna: "vagas", direcao: "DESC" },
+        };
+        const config = ordenacoes[String(destaque)];
+        if (!config) return respond([]);
+
+        const query = repo
+          .createQueryBuilder("nota")
+          .select(colunasDestaque)
+          .where("nota.modalidade = :modalidade", { modalidade: MODALIDADE_AMPLA_CONCORRENCIA });
+
+        // 0 aqui é "sem nota de corte registrada" (transformer da entidade
+        // trata vazio como 0), não uma nota real — sem esse filtro, essas
+        // linhas dominariam o topo de Maiores/Menores Notas.
+        if (destaque !== 'mais-ofertados') query.andWhere(`${NOTA_CORTE_NUMERICA} > 0`);
+
+        if (ano) query.andWhere("nota.ano = :ano", { ano: Number(ano) });
+        if (uf) query.andWhere("nota.uf_campus = :uf", { uf: String(uf).toUpperCase() });
+
+        const resultados = await query
+          .orderBy(config.coluna, config.direcao)
+          .limit(30)
+          .getRawMany();
+
+        return respond(resultados);
       }
 
       // 2. Busca Global (Home)
