@@ -1,8 +1,7 @@
 import "reflect-metadata";
 import "dotenv/config";
-import { readFile } from "fs/promises";
 import { AppDataSource } from "../database/datasource";
-import { abrirPlanilha, validarLinhas, PlanilhaInvalidaError, LinhaValida } from "../services/importacaoNotas";
+import { processarPlanilha, PlanilhaInvalidaError, LinhaValida } from "../services/importacaoNotas";
 
 // Importa uma planilha de notas de corte do SISU/INEP (formato do Portal
 // Único de Acesso) para a tabela NotasDeCortes, normalizando o ano.
@@ -83,10 +82,10 @@ async function main() {
     }
 
     console.log(`Lendo ${arquivo}...`);
-    const buffer = await readFile(arquivo);
-    const { sheet, colIndex } = await abrirPlanilha(buffer);
-
-    const { totalLinhas, validas, comErro } = validarLinhas(sheet, colIndex, ano);
+    // Passa o caminho do arquivo direto (não lê pra um Buffer antes) — o
+    // ExcelJS abre o próprio stream de leitura do disco, sem segurar o
+    // arquivo inteiro em memória de uma vez.
+    const { totalLinhas, validas, comErro } = await processarPlanilha(arquivo, ano);
     console.log(`${totalLinhas} linhas encontradas (${validas.length} válidas, ${comErro.length} com erro).`);
 
     if (comErro.length > 0) {

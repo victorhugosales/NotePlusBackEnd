@@ -2,7 +2,7 @@ import { Response } from "express";
 import { AppDataSource } from "../database/datasource";
 import { ImportacaoNotas } from "../Entities/ImportacaoNotas";
 import { AuthRequest } from "../middlewares/authMiddleware";
-import { abrirPlanilha, validarLinhas, PlanilhaInvalidaError, LinhaValida } from "../services/importacaoNotas";
+import { processarPlanilha, PlanilhaInvalidaError, LinhaValida } from "../services/importacaoNotas";
 import { statsCache, STATS_CACHE_KEY, anosCache, ANOS_CACHE_KEY } from "../cache/searchCache";
 
 const TAMANHO_LOTE = 500;
@@ -54,8 +54,7 @@ export class ImportacaoController {
     if (!ano) return res.status(400).json({ error: `Informe um ano entre ${ANO_MINIMO} e ${ANO_MAXIMO}` });
 
     try {
-      const { sheet, colIndex } = await abrirPlanilha(req.file.buffer);
-      const { totalLinhas, validas, comErro } = validarLinhas(sheet, colIndex, ano);
+      const { totalLinhas, validas, comErro } = await processarPlanilha(req.file.buffer, ano);
 
       const existentes = await AppDataSource.query(
         `SELECT COUNT(*) AS total FROM "NotasDeCortes" WHERE "EDICAO" = $1`,
@@ -100,8 +99,7 @@ export class ImportacaoController {
     const substituir = req.body.substituir === "true" || req.body.substituir === true;
 
     try {
-      const { sheet, colIndex } = await abrirPlanilha(req.file.buffer);
-      const { totalLinhas, validas, comErro } = validarLinhas(sheet, colIndex, ano);
+      const { totalLinhas, validas, comErro } = await processarPlanilha(req.file.buffer, ano);
 
       const existentes = await AppDataSource.query(
         `SELECT COUNT(*) AS total FROM "NotasDeCortes" WHERE "EDICAO" = $1`,

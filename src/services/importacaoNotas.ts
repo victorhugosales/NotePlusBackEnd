@@ -1,10 +1,18 @@
 import ExcelJS from "exceljs";
+import { Readable } from "stream";
 
 // Lógica de leitura/validação de planilhas de notas de corte do SISU/INEP,
 // compartilhada entre o script de terminal (src/scripts/importarNotasCorte.ts)
 // e a rota de importação usada pelo admin na interface
 // (src/Controllers/ImportacaoController.ts) — mesma regra nos dois lugares,
 // sem duplicar.
+//
+// Lê em modo streaming (ExcelJS.stream.xlsx.WorkbookReader), linha por linha,
+// em vez de workbook.xlsx.load() (carrega a planilha inteira num modelo de
+// objetos em memória). Uma planilha do SISU passa de 50-60 mil linhas — em
+// homologação/produção (memória limitada do host), o load() completo
+// derrubava o processo (Node abortava por estourar o limite de heap,
+// "Exited with status 134" no Render) antes mesmo de responder à requisição.
 
 export const COLUNAS_PLANILHA = [
   "EDICAO", "CO_IES", "NO_IES", "SG_IES", "DS_ORGANIZACAO_ACADEMICA",
@@ -66,25 +74,12 @@ function getCellNumberRaw(row: ExcelJS.Row, colIndex: Record<string, number>, co
   return Number.isFinite(valor) ? valor : null;
 }
 
-// Abre o arquivo, encontra a aba com cabeçalho "EDICAO" na primeira coluna
-// e confere se todas as colunas esperadas existem. Lança PlanilhaInvalidaError
-// (mensagem já pronta pra exibir ao admin) se a estrutura não bater.
-export async function abrirPlanilha(buffer: Buffer): Promise<{ sheet: ExcelJS.Worksheet; colIndex: Record<string, number> }> {
-  const workbook = new ExcelJS.Workbook();
-  // Cast pontual: os tipos do exceljs esperam o Buffer não-genérico de uma
-  // versão mais antiga do @types/node; em runtime é o mesmo Buffer.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await workbook.xlsx.load(buffer as any);
-
-  const sheet = workbook.worksheets.find(
-    (ws) => ws.rowCount > 1 && (ws.getRow(1).getCell(1).text || "").trim() === "EDICAO"
-  );
-  if (!sheet) {
-    throw new PlanilhaInvalidaError('Não encontrei nenhuma aba com cabeçalho "EDICAO" na primeira coluna.');
-  }
-
+// Monta o colIndex a partir da linha de cabeçalho e confere se todas as
+// colunas esperadas existem. Lança PlanilhaInvalidaError (mensagem já
+// pronta pra exibir ao admin) se a estrutura não bater.
+function construirColIndex(headerRow: ExcelJS.Row): Record<string, number> {
   const colIndex: Record<string, number> = {};
-  sheet.getRow(1).eachCell((cell, colNumber) => {
+  headerRow.eachCell((cell, colNumber) => {
     colIndex[(cell.text || "").trim()] = colNumber;
   });
 
@@ -102,72 +97,63 @@ export async function abrirPlanilha(buffer: Buffer): Promise<{ sheet: ExcelJS.Wo
     throw new PlanilhaInvalidaError(`Colunas esperadas não encontradas na planilha: ${faltando.join(", ")}`);
   }
 
-  return { sheet, colIndex };
+  return colIndex;
 }
 
-// Valida linha a linha e devolve dois grupos: as prontas pra inserir (já no
-// formato de array posicional que o INSERT em lote espera) e as com erro
-// (motivo detalhado, linha não entra na importação). Uma planilha grande
-// pode ter algumas linhas ruins sem que isso invalide o resto.
-export function validarLinhas(
-  sheet: ExcelJS.Worksheet,
+// Valida uma linha de dados (já sabendo que é a aba certa) e devolve o
+// motivo caso tenha erro, ou os valores prontos pro INSERT em lote caso
+// esteja tudo certo.
+function validarLinha(
+  row: ExcelJS.Row,
+  numeroLinha: number,
   colIndex: Record<string, number>,
   ano: number
-): ResultadoValidacao {
-  const validas: LinhaValida[] = [];
-  const comErro: LinhaComErro[] = [];
-  let totalLinhas = 0;
+): { valida: LinhaValida } | { erro: LinhaComErro } {
+  const erros: string[] = [];
 
-  for (let i = 2; i <= sheet.rowCount; i++) {
-    const row = sheet.getRow(i);
-    if (!row.hasValues) continue;
-    totalLinhas++;
-
-    const erros: string[] = [];
-
-    for (const campo of CAMPOS_TEXTO_OBRIGATORIOS) {
-      if (!getCellText(row, colIndex, campo)) {
-        erros.push(`${campo} está vazio`);
-      }
+  for (const campo of CAMPOS_TEXTO_OBRIGATORIOS) {
+    if (!getCellText(row, colIndex, campo)) {
+      erros.push(`${campo} está vazio`);
     }
+  }
 
-    const uf = getCellText(row, colIndex, "SG_UF_CAMPUS");
-    if (uf && !UFS_VALIDAS.includes(uf.toUpperCase())) {
-      erros.push(`SG_UF_CAMPUS "${uf}" não é uma UF válida`);
-    }
+  const uf = getCellText(row, colIndex, "SG_UF_CAMPUS");
+  if (uf && !UFS_VALIDAS.includes(uf.toUpperCase())) {
+    erros.push(`SG_UF_CAMPUS "${uf}" não é uma UF válida`);
+  }
 
-    const coIes = getCellNumberRaw(row, colIndex, "CO_IES");
-    if (coIes === null || coIes <= 0) {
-      erros.push("CO_IES ausente ou inválido");
-    }
+  const coIes = getCellNumberRaw(row, colIndex, "CO_IES");
+  if (coIes === null || coIes <= 0) {
+    erros.push("CO_IES ausente ou inválido");
+  }
 
-    const coIesCurso = getCellNumberRaw(row, colIndex, "CO_IES_CURSO");
-    if (coIesCurso === null || coIesCurso <= 0) {
-      erros.push("CO_IES_CURSO ausente ou inválido");
-    }
+  const coIesCurso = getCellNumberRaw(row, colIndex, "CO_IES_CURSO");
+  if (coIesCurso === null || coIesCurso <= 0) {
+    erros.push("CO_IES_CURSO ausente ou inválido");
+  }
 
-    const notaCorte = getCellNumberRaw(row, colIndex, "NU_NOTACORTE");
-    if (notaCorte === null || notaCorte < 0 || notaCorte > 1000) {
-      erros.push("NU_NOTACORTE ausente ou fora do intervalo 0–1000");
-    }
+  const notaCorte = getCellNumberRaw(row, colIndex, "NU_NOTACORTE");
+  if (notaCorte === null || notaCorte < 0 || notaCorte > 1000) {
+    erros.push("NU_NOTACORTE ausente ou fora do intervalo 0–1000");
+  }
 
-    const vagas = getCellNumberRaw(row, colIndex, "QT_VAGAS_CONCORRENCIA");
-    if (vagas === null || vagas < 0) {
-      erros.push("QT_VAGAS_CONCORRENCIA ausente ou negativa");
-    }
+  const vagas = getCellNumberRaw(row, colIndex, "QT_VAGAS_CONCORRENCIA");
+  if (vagas === null || vagas < 0) {
+    erros.push("QT_VAGAS_CONCORRENCIA ausente ou negativa");
+  }
 
-    const inscricoes = getCellNumberRaw(row, colIndex, "QT_INSCRICAO");
-    if (inscricoes === null || inscricoes < 0) {
-      erros.push("QT_INSCRICAO ausente ou negativa");
-    }
+  const inscricoes = getCellNumberRaw(row, colIndex, "QT_INSCRICAO");
+  if (inscricoes === null || inscricoes < 0) {
+    erros.push("QT_INSCRICAO ausente ou negativa");
+  }
 
-    if (erros.length > 0) {
-      comErro.push({ linha: i, erros });
-      continue;
-    }
+  if (erros.length > 0) {
+    return { erro: { linha: numeroLinha, erros } };
+  }
 
-    validas.push({
-      linha: i,
+  return {
+    valida: {
+      linha: numeroLinha,
       valores: [
         ano, // EDICAO normalizado — ver comentário no script CLI sobre o código interno do MEC
         coIes,
@@ -191,7 +177,63 @@ export function validarLinhas(
         notaCorte,
         inscricoes,
       ],
-    });
+    },
+  };
+}
+
+// Lê e valida a planilha inteira em modo streaming: acha a aba com
+// cabeçalho "EDICAO" na primeira coluna, valida linha por linha sem manter
+// a planilha inteira em memória (cada linha é descartada assim que
+// processada). `input` aceita um Buffer (rota HTTP, arquivo já veio em
+// memória via multer) ou um caminho de arquivo (script de terminal — nesse
+// caso nem o arquivo inteiro é lido de uma vez, o ExcelJS abre o próprio
+// stream de leitura do disco).
+export async function processarPlanilha(input: Buffer | string, ano: number): Promise<ResultadoValidacao> {
+  const origem = typeof input === "string" ? input : Readable.from(input);
+  const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(origem, {
+    worksheets: "emit",
+    sharedStrings: "cache",
+    styles: "ignore",
+    hyperlinks: "ignore",
+    entries: "ignore",
+  });
+
+  let colIndex: Record<string, number> | null = null;
+  const validas: LinhaValida[] = [];
+  const comErro: LinhaComErro[] = [];
+  let totalLinhas = 0;
+
+  for await (const worksheetReader of workbookReader) {
+    let numeroLinha = 0;
+    let estaAbaEhValida = false;
+
+    for await (const row of worksheetReader) {
+      numeroLinha++;
+
+      if (numeroLinha === 1) {
+        if ((row.getCell(1).text || "").trim() !== "EDICAO") continue; // aba errada, pula (streaming não permite pular sem consumir)
+
+        estaAbaEhValida = true;
+        colIndex = construirColIndex(row);
+        continue;
+      }
+
+      if (!estaAbaEhValida || !colIndex) continue;
+      if (!row.hasValues) continue;
+
+      totalLinhas++;
+      const resultado = validarLinha(row, numeroLinha, colIndex, ano);
+      if ("erro" in resultado) comErro.push(resultado.erro);
+      else validas.push(resultado.valida);
+    }
+
+    // Já achamos e processamos a aba certa — não precisa olhar as outras
+    // (encerra o WorkbookReader e libera o stream de leitura).
+    if (estaAbaEhValida) break;
+  }
+
+  if (!colIndex) {
+    throw new PlanilhaInvalidaError('Não encontrei nenhuma aba com cabeçalho "EDICAO" na primeira coluna.');
   }
 
   return { totalLinhas, validas, comErro };
